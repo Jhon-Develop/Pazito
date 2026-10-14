@@ -1,0 +1,16 @@
+# Development image for the Pazito monorepo. Uses Bun for workspaces and scripts.
+FROM oven/bun:1
+WORKDIR /workspace
+
+# Copy workspace manifests first so dependency installation is cacheable.
+COPY package.json ./package.json
+COPY apps/web/package.json ./apps/web/package.json
+COPY apps/api/package.json ./apps/api/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+RUN bun install
+
+COPY . .
+RUN bun run build:contracts
+
+EXPOSE 3000 4321
+CMD ["bun", "run", "dev"]

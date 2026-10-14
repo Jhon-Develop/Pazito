@@ -1,0 +1,81 @@
+# Entorno local de desarrollo. No usar estas credenciales en producción.
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: pazito-mysql-dev
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: pazito
+      MYSQL_USER: pazito
+      MYSQL_PASSWORD: pazito_dev_only
+      MYSQL_ROOT_PASSWORD: root_dev_only_change_me
+      TZ: UTC
+    ports:
+      - '127.0.0.1:3306:3306'
+    volumes:
+      - pazito_mysql_data:/var/lib/mysql
+    command: ['mysqld', '--character-set-server=utf8mb4', '--collation-server=utf8mb4_0900_ai_ci']
+    healthcheck:
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -u root -p"$$MYSQL_ROOT_PASSWORD" --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: pazito-api-dev
+    restart: unless-stopped
+    command: ['bun', 'run', '--cwd', 'apps/api', 'dev']
+    environment:
+      NODE_ENV: development
+      API_HOST: 0.0.0.0
+      API_PORT: 3000
+      API_PUBLIC_URL: http://localhost:3000
+      FRONTEND_ORIGINS: http://localhost:4321,http://127.0.0.1:4321
+      DATABASE_URL: ${PAZITO_DATABASE_URL:-mysql://pazito:pazito_dev_only@mysql:3306/pazito}
+      SESSION_SECRET: ${PAZITO_SESSION_SECRET:-docker-dev-only-change-this-to-a-random-secret-longer-than-32-characters}
+      SESSION_COOKIE_NAME: pazito_session
+      SESSION_TTL_HOURS: 168
+      PASSWORD_RESET_TTL_MINUTES: 30
+      EMAIL_TRANSPORT: log
+      FX_PROVIDER: frankfurter
+      FX_API_BASE_URL: https://api.frankfurter.dev/v1
+      FX_TIMEOUT_MS: 3500
+      FX_CACHE_HOURS: 24
+      RECEIPTS_DIR: /workspace/apps/api/var/receipts
+      RECEIPTS_MAX_BYTES: 5242880
+      TRUST_PROXY: 'false'
+      LOG_LEVEL: info
+    ports:
+      - '127.0.0.1:3000:3000'
+    volumes:
+      - pazito_receipts:/workspace/apps/api/var/receipts
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: pazito-web-dev
+    restart: unless-stopped
+    command: ['bun', 'run', '--cwd', 'apps/web', 'dev', '--host', '0.0.0.0']
+    environment:
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:3000/api/v1}
+      PUBLIC_DEMO_MODE: 'false'
+      PUBLIC_APP_NAME: Pazito
+      PUBLIC_APP_DESCRIPTION: Registra y divide gastos compartidos sin conflictos
+      PUBLIC_DEFAULT_CURRENCY: COP
+      PUBLIC_DEFAULT_LOCALE: es-CO
+    ports:
+      - '127.0.0.1:4321:4321'
+    depends_on:
+      - api
+
+volumes:
+  pazito_mysql_data:
+  pazito_receipts:
