@@ -140,7 +140,7 @@ export default function DashboardLayout() {
                 aria-haspopup="true"
                 aria-label="Menú de usuario"
               >
-                <Avatar name={user?.name} size="sm" />
+                <Avatar src={user?.avatarUrl} name={user?.name} size="sm" />
                 <span className="hidden sm:block text-sm font-medium text-text-primary">{user?.name}</span>
                 <ChevronDown className="w-4 h-4 text-text-tertiary" aria-hidden="true" />
               </button>
@@ -155,19 +155,20 @@ export default function DashboardLayout() {
                   <div className="absolute right-0 mt-2 w-48 card shadow-lg border border-border-primary py-1 z-50 animate-in slide-in-from-bottom">
                     <DropdownMenuItem
                       onClick={() => { setUserMenuOpen(false); navigate('/profile'); }}
-                    >
+                      className="hover:text-success-500 hover:scale-105 transform transition-transform ease-in-out duration-300">
                       <UserIcon className="w-4 h-4" aria-hidden="true" />
                       Perfil
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => { setUserMenuOpen(false); navigate('/settings'); }}
+                      className="hover:scale-105 transform transition-transform ease-in-out duration-300"
                     >
                       <Settings className="w-4 h-4" aria-hidden="true" />
                       Configuración
                     </DropdownMenuItem>
                     <hr className="my-1 border-border-primary" />
-                    <DropdownMenuItem onClick={handleLogout} className="text-error-600">
-                      <LogOut className="w-4 h-4" aria-hidden="true" />
+                    <DropdownMenuItem onClick={handleLogout} className="hover:text-error-600 hover:scale-105 transform transition-transform ease-in-out duration-300">
+                      <LogOut className="w-4 h-4 text-error-600" aria-hidden="true" />
                       Cerrar sesión
                     </DropdownMenuItem>
                   </div>

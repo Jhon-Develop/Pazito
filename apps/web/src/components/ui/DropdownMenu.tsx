@@ -64,7 +64,7 @@ export function DropdownMenuContent({ open, onClose, children, className, ...pro
     <div
       ref={contentRef}
       className={clsx(
-        'absolute right-0 mt-2 w-48 card shadow-lg border border-border-primary py-1 z-50 animate-in slide-in-from-bottom',
+        'absolute right-0 mt-2 w-48 card shadow-lg border border-border-primary p-1.5 z-50 animate-in slide-in-from-bottom',
         className
       )}
       role="menu"
@@ -89,7 +89,7 @@ export function DropdownMenuItem({ className, onClick, children, ...props }: Dro
   return (
     <button
       className={clsx(
-        'w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-surface-100 transition-colors',
+        'w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-surface-100 transition-colors rounded-lg',
         className
       )}
       onClick={handleClick}
