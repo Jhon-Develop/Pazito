@@ -19,17 +19,29 @@ const safe = (v: bigint) => toSafeAmount(v);
 const pendingStatuses = ['declared', 'disputed'] as const;
 
 async function dto(id: string, requesterId: string) {
-  const rows = await db.select({ settlement: settlements })
-    .innerJoin(groupMembers, and(eq(groupMembers.groupId, settlements.groupId), eq(groupMembers.userId, requesterId), eq(groupMembers.status, 'active')))
-    .where(eq(settlements.id, id)).limit(1);
+  const rows = await db
+    .select({ settlement: settlements })
+    .from(settlements)
+    .innerJoin(
+      groupMembers,
+      and(
+        eq(groupMembers.groupId, settlements.groupId),
+        eq(groupMembers.userId, requesterId),
+        eq(groupMembers.status, 'active'),
+      ),
+    )
+    .where(eq(settlements.id, id))
+    .limit(1);
   const settlement = rows[0]?.settlement;
   if (!settlement) throw notFound('Liquidación no encontrada');
   const parties = await db.select({ id: users.id, name: users.name, avatarUrl: users.avatarUrl }).from(users).where(inArray(users.id, [settlement.fromUserId, settlement.toUserId]));
   const from = parties.find(p => p.id === settlement.fromUserId); const to = parties.find(p => p.id === settlement.toUserId);
-  return { id: settlement.id, groupId: settlement.groupId, fromUserId: settlement.fromUserId, fromUserName: from?.name ?? 'Usuario', fromUserAvatar: from?.avatarUrl ?? null,
+  return {
+    id: settlement.id, groupId: settlement.groupId, fromUserId: settlement.fromUserId, fromUserName: from?.name ?? 'Usuario', fromUserAvatar: from?.avatarUrl ?? null,
     toUserId: settlement.toUserId, toUserName: to?.name ?? 'Usuario', toUserAvatar: to?.avatarUrl ?? null, amountMinor: safe(settlement.amountMinor), currency: settlement.currency,
     status: settlement.status, declaredAt: settlement.declaredAt.toISOString(), confirmedAt: settlement.confirmedAt?.toISOString() ?? null,
-    disputedAt: settlement.disputedAt?.toISOString() ?? null, disputeReason: settlement.disputeReason, createdAt: settlement.createdAt.toISOString(), updatedAt: settlement.updatedAt.toISOString() };
+    disputedAt: settlement.disputedAt?.toISOString() ?? null, disputeReason: settlement.disputeReason, createdAt: settlement.createdAt.toISOString(), updatedAt: settlement.updatedAt.toISOString()
+  };
 }
 
 /** Pending declarations reserve the corresponding balance so that several offline clients cannot over-declare the same debt. */

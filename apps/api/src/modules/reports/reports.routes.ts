@@ -7,15 +7,18 @@ import { expenses, expenseShares, groups, settlements, users } from '../../infra
 import { asyncHandler } from '../../shared/http/async-handler.js';
 import { requireAuth } from '../../shared/http/auth.middleware.js';
 import { assertGroupPermission } from '../groups/permissions.service.js';
-import { toSafeAmount } from '../../shared/validation/currency.js';
 import { badRequest, notFound } from '../../shared/errors/app-error.js';
 import { auditEvent } from '../../infrastructure/observability/audit.js';
+import { currencyExponent } from '../../shared/validation/currency.js';
 
 export const reportsRouter = Router();
 function csvCell(value: unknown) { const text = String(value ?? ''); return `"${text.replace(/"/g, '""')}"`; }
 function minorToMajorString(amountMinor: bigint, currency: string) {
-  const digits = new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits;
-  const base = 10n ** BigInt(digits); const whole = amountMinor / base; const fraction = (amountMinor % base).toString().padStart(digits, '0');
+  const digits = currencyExponent(currency);
+  const base = 10n ** BigInt(digits); 
+  const whole = amountMinor / base; 
+  const fraction = (amountMinor % base).toString().padStart(digits, '0');
+  
   return digits ? `${whole}.${fraction}` : whole.toString();
 }
 

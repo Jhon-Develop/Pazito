@@ -1,15 +1,37 @@
 import { badRequest } from '../errors/app-error.js';
 
 const supportedCurrencies = new Set(typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('currency') : []);
+const currencyExponentOverrides: Readonly<Record<string, number>> = { COP: 2, };
 
 export function currencyExponent(currency: string): number {
   try {
-    if (!/^[A-Z]{3}$/.test(currency) || (supportedCurrencies.size > 0 && !supportedCurrencies.has(currency))) throw new Error('Unsupported currency');
-    return new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits;
+    if (
+      !/^[A-Z]{3}$/.test(currency) ||
+      (supportedCurrencies.size > 0 &&
+        !supportedCurrencies.has(currency))
+    ) {
+      throw new Error('Unsupported currency');
+    }
+    const override = currencyExponentOverrides[currency];
+    if (override !== undefined) {
+      return override;
+    }
+    const digits = new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency,
+    }).resolvedOptions().maximumFractionDigits;
+    if (typeof digits !== 'number' || Number.isNaN(digits)) {
+      throw new Error('Invalid fraction digits');
+    }
+    return digits;
   } catch {
-    throw badRequest(`Código de moneda no soportado: ${currency}`, 'INVALID_CURRENCY');
+    throw badRequest(
+      `Código de moneda no soportado: ${currency}`,
+      'INVALID_CURRENCY',
+    );
   }
 }
+
 export function isValidCurrency(currency: string): boolean {
   try { currencyExponent(currency); return true; } catch { return false; }
 }
