@@ -28,6 +28,64 @@ import { fileURLToPath } from 'node:url';
 
 export const logger = pino({ level: env.LOG_LEVEL, redact: { paths: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["set-cookie"]', 'password', 'passwordHash', 'token', 'tokenHash', 'SESSION_SECRET', 'SMTP_PASSWORD'], censor: '[REDACTED]' } });
 
+/**
+ * Extract safe error metadata without logging request bodies, SQL statements or bound parameters.
+ * Drizzle may wrap the original mysql2 error in `cause`, so inspect a short cause chain.
+ */
+function getUnexpectedErrorDiagnostics(error: unknown, includeMessage: boolean): Record<string, unknown> {
+  const chain: Array<Record<string, unknown>> = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current && typeof current === 'object'; depth += 1) {
+    const record = current as Record<string, unknown>;
+    chain.push(record);
+    const cause = record.cause;
+    if (!cause || cause === current) break;
+    current = cause;
+  }
+
+  const findString = (key: string): string | undefined => {
+    for (const entry of chain) {
+      const value = entry[key];
+      if (typeof value === 'string' && value.length > 0) return value;
+    }
+    return undefined;
+  };
+  const findInteger = (key: string): number | undefined => {
+    for (const entry of chain) {
+      const value = entry[key];
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return undefined;
+  };
+
+  const names = chain.map(entry => typeof entry.name === 'string' ? entry.name : 'UnknownError');
+  const driverMessage = findString('sqlMessage');
+  let developmentMessage = driverMessage;
+  if (!developmentMessage && includeMessage) {
+    // Do not print Drizzle's wrapper message, which may contain SQL and bound values.
+    for (let index = chain.length - 1; index >= 0; index -= 1) {
+      const entry = chain[index]!;
+      const name = typeof entry.name === 'string' ? entry.name : '';
+      const message = typeof entry.message === 'string' ? entry.message : undefined;
+      if (message && !/DrizzleQueryError|failed query/i.test(`${name} ${message}`)) {
+        developmentMessage = message;
+        break;
+      }
+    }
+  }
+
+  const code = findString('code');
+  const errno = findInteger('errno');
+  const sqlState = findString('sqlState');
+  return {
+    errorChain: names,
+    ...(code ? { causeCode: code } : {}),
+    ...(errno !== undefined ? { causeErrno: errno } : {}),
+    ...(sqlState ? { causeSqlState: sqlState } : {}),
+    ...(includeMessage && developmentMessage ? { causeMessage: developmentMessage } : {}),
+  };
+}
+
 function endpointRateLimit(windowMs: number, limit: number, message: string) {
   return rateLimit({ windowMs, limit, standardHeaders: 'draft-8', legacyHeaders: false, handler: (req, res) => {
     res.status(429).json({ code: 'RATE_LIMITED', message, statusCode: 429, requestId: req.requestId });
@@ -102,7 +160,16 @@ export function createApp() {
       else if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'PROTOCOL_CONNECTION_LOST') normalized = new AppError(503, 'SERVICE_UNAVAILABLE', 'El servicio requerido no está disponible');
       else normalized = new AppError(500, 'INTERNAL_ERROR', 'Ocurrió un error interno');
     }
-    logger[normalized.statusCode >= 500 ? 'error' : 'warn']({ requestId: req.requestId, method: req.method, path: req.path, statusCode: normalized.statusCode, code: normalized.code, errName: error instanceof Error ? error.name : 'UnknownError' }, 'Solicitud fallida');
+    const isDevelopment = env.NODE_ENV !== 'production';
+    logger[normalized.statusCode >= 500 ? 'error' : 'warn']({
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      statusCode: normalized.statusCode,
+      code: normalized.code,
+      errName: error instanceof Error ? error.name : 'UnknownError',
+      ...getUnexpectedErrorDiagnostics(error, isDevelopment),
+    }, 'Solicitud fallida');
     if (res.headersSent) return;
     res.status(normalized.statusCode).json({ code: normalized.code, message: normalized.message, ...(normalized.details ? { details: normalized.details } : {}), statusCode: normalized.statusCode, requestId: req.requestId });
   };

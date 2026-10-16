@@ -40,7 +40,7 @@ export const groupMembers = mysqlTable('group_members', {
   id: id().primaryKey(), groupId: varchar('group_id', { length: 36 }).notNull().references(() => groups.id),
   userId: varchar('user_id', { length: 36 }).notNull().references(() => users.id),
   role: varchar('role', { length: 12 }).$type<MemberRole>().notNull().default('member'),
-  status: varchar('status', { length: 12 }).notNull().default('active'), joinedAt: createdAt(), leftAt: datetime('left_at', { mode: 'date', fsp: 3 }),
+  status: varchar('status', { length: 12 }).notNull().default('active'), joinedAt: datetime('joined_at', { mode: 'date', fsp: 3 }).notNull().$defaultFn(() => new Date()), leftAt: datetime('left_at', { mode: 'date', fsp: 3 }),
 }, (t) => [uniqueIndex('uq_group_members_group_user').on(t.groupId, t.userId), index('idx_group_members_user_status').on(t.userId, t.status), index('idx_group_members_group_status').on(t.groupId, t.status)]);
 
 export const groupRolePermissions = mysqlTable('group_role_permissions', {
