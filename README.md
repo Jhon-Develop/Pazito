@@ -78,6 +78,13 @@ packages/
 
 8. Para explorar la interfaz sin registrar una cuenta, pulsa **Probar demo sin registrarme** en la portada (o abre `/app/#/demo`). La demo utiliza datos ficticios en memoria del navegador y no escribe en MySQL/Clever Cloud. Al recargar la pestaña se reinicia. Para persistir los datos de la aplicación, entra con una cuenta real.
 
+## PWA, caché e importes
+
+- La PWA usa un service worker con caché versionada. Cuando se publica una corrección del frontend, hay que desplegar el sitio web y volver a abrir la app instalada con conexión para que el worker nuevo invalide bundles antiguos.
+- El importe se guarda como un entero en unidades menores (`amountMinor`). Para `200.000 COP`, el valor esperado de almacenamiento es `20_000_000`; el formateador debe mostrar `$ 200.000` en móvil y escritorio. No se corrige este tipo de discrepancia modificando datos directamente en MySQL.
+- La captura offline disponible se limita a gastos nuevos en grupos y con miembros cargados previamente en el dispositivo. Las operaciones se guardan en IndexedDB y se sincronizan con clave de idempotencia; balances oficiales, grupos/invitaciones, recibos y liquidaciones requieren conexión. Validar el flujo en un móvil real antes de declarar completado el soporte offline.
+- Tras desconectar y reconectar, comprobar la cola pendiente. Si un `POST` es rechazado por permisos o validación, revisar el mensaje de sincronización y resolver el conflicto antes de repetirlo.
+
 ## Guía de instalación en otro equipo
 
 Consulta [`docs/GUIA_INICIO_OTRO_PC.md`](./docs/GUIA_INICIO_OTRO_PC.md) para clonar con Git, instalar dependencias, conectar Clever Cloud o arrancar frontend + API + MySQL mediante Docker Compose.
@@ -141,6 +148,8 @@ Todas las audiencias previstas; modo offline desde el MVP; invitación por enlac
 - Las migraciones se aplican manualmente, no al arrancar HTTP; primero revisa copias de seguridad y entorno. No ejecutes sobre datos importantes sin backup probado.
 
 ## Documentación
+
+- `DOCUMENTACION_ACADEMICA_PAZITO.md`: documentación integral académica y técnica, alineada con lluvia de ideas, selección del tema, mapa de impacto y User Story Mapping.
 
 - [`PRODUCT_REQUIREMENTS.md`](./PRODUCT_REQUIREMENTS.md): decisiones del producto y criterios del MVP.
 - [`IMPLEMENTATION_STATUS.md`](./IMPLEMENTATION_STATUS.md): qué está implementado y qué requiere verificación.

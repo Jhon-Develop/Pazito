@@ -19,10 +19,28 @@ export interface CurrencyFormatOptions {
 export const DEFAULT_CURRENCY: CurrencyCode = 'COP';
 export const DEFAULT_LOCALE = 'es-CO';
 
+/**
+ * Keep storage precision stable across browsers/ICU builds.
+ * COP has two minor digits for storage even though the UI displays whole pesos.
+ * The explicit entries cover currencies currently supported/tested by Pazito;
+ * other valid ISO codes fall back to the runtime currency metadata.
+ */
+const CURRENCY_FRACTION_DIGITS: Record<string, number> = {
+  COP: 2,
+  USD: 2,
+  EUR: 2,
+  JPY: 0,
+  BHD: 3,
+};
+
 /** Return the ISO-4217 minor-unit precision for a currency. */
 export function getCurrencyFractionDigits(currency: CurrencyCode = DEFAULT_CURRENCY): number {
+  const normalizedCurrency = currency.toUpperCase();
+  const configuredDigits = CURRENCY_FRACTION_DIGITS[normalizedCurrency];
+  if (configuredDigits !== undefined) return configuredDigits;
+
   try {
-    return new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits ?? 2;
+    return new Intl.NumberFormat('en', { style: 'currency', currency: normalizedCurrency }).resolvedOptions().maximumFractionDigits ?? 2;
   } catch {
     return 2;
   }

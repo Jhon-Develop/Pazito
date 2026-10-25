@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { format } from 'date-fns';
 import {
   formatDate,
   formatDateShort,
@@ -80,14 +81,14 @@ describe('Date Formatting', () => {
     it('formats date and time', () => {
       const result = formatDateTime(testDate);
       expect(result).toContain('2024');
-      expect(result).toContain('14:30');
+      expect(result).toContain(format(testDate, 'HH:mm'));
     });
   });
 
   describe('formatTime', () => {
     it('formats time only', () => {
       const result = formatTime(testDate);
-      expect(result).toMatch(/14:30/);
+      expect(result).toContain(format(testDate, 'HH:mm'));
     });
   });
 
@@ -119,7 +120,7 @@ describe('Date Formatting', () => {
 
   describe('formatDateTimeForInput', () => {
     it('formats as YYYY-MM-DDTHH:mm for input[type=datetime-local]', () => {
-      expect(formatDateTimeForInput(testDate)).toBe('2024-01-15T14:30');
+      expect(formatDateTimeForInput(testDate)).toBe(format(testDate, "yyyy-MM-dd'T'HH:mm"));
     });
   });
 
@@ -146,13 +147,16 @@ describe('Date Formatting', () => {
 
   describe('getDateRange', () => {
     it('returns array of dates in range', () => {
-      const start = new Date('2024-01-15');
-      const end = new Date('2024-01-17');
+      // Use local calendar dates because getDateRange works on local days.
+      const start = new Date(2024, 0, 15);
+      const end = new Date(2024, 0, 17);
       const range = getDateRange(start, end);
       expect(range).toHaveLength(3);
-      expect(range[0].toISOString().split('T')[0]).toBe('2024-01-15');
-      expect(range[1].toISOString().split('T')[0]).toBe('2024-01-16');
-      expect(range[2].toISOString().split('T')[0]).toBe('2024-01-17');
+      expect(range.map((date) => format(date, 'yyyy-MM-dd'))).toEqual([
+        '2024-01-15',
+        '2024-01-16',
+        '2024-01-17',
+      ]);
     });
   });
 });

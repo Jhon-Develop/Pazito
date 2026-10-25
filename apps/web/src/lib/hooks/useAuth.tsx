@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { getApiClient, ApiRequestError, setApiAccessToken } from '../api';
-import { setOfflineUserScope } from '../offline';
+import { getApiClient, ApiRequestError, ApiNetworkError, setApiAccessToken } from '../api';
+import { cacheUser, getCachedUser, getOfflineUserHint, setOfflineUserScope } from '../offline';
 import type { User, Session, RegisterRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest } from '../api/types';
 
 interface AuthContextValue {
@@ -41,6 +41,35 @@ function readableAuthError(error: unknown, fallback: string): string {
   return descriptions.length ? `${error.message}. ${descriptions.join('. ')}` : error.message;
 }
 
+
+function userToOfflineRecord(user: User) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    avatarUrl: user.avatarUrl ?? undefined,
+    locale: user.locale,
+    timezone: user.timezone,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    groups: [] as string[],
+  };
+}
+
+function userFromOfflineRecord(record: NonNullable<Awaited<ReturnType<typeof getCachedUser>>>): User {
+  const timestamp = record.cachedAt || new Date().toISOString();
+  return {
+    id: record.id,
+    name: record.name,
+    email: record.email,
+    avatarUrl: record.avatarUrl,
+    locale: record.locale ?? 'es-CO',
+    timezone: record.timezone ?? 'America/Bogota',
+    createdAt: record.createdAt ?? timestamp,
+    updatedAt: record.updatedAt ?? timestamp,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -56,6 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newSession.user);
     setApiAccessToken(newSession.accessToken || null);
     setOfflineUserScope(newSession.user.id);
+    void cacheUser(userToOfflineRecord(newSession.user)).catch((cacheError) => {
+      console.warn('[Pazito] No se pudo guardar el perfil local para modo offline:', cacheError);
+    });
   }, []);
 
   const clearAuth = useCallback(() => {
@@ -78,10 +110,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const currentUser = await api.getCurrentUser();
         setUser(currentUser);
+        setSession(null);
+        setApiAccessToken(null);
         setOfflineUserScope(currentUser.id);
-        // Note: In a real app, you'd validate the session/token here
+        void cacheUser(userToOfflineRecord(currentUser)).catch((cacheError) => {
+          console.warn('[Pazito] No se pudo actualizar el perfil local:', cacheError);
+        });
       } catch (err) {
-        // Not authenticated, clear any stale state
+        const isExplicitlyUnauthorized = err instanceof ApiRequestError && err.status === 401;
+        const networkUnavailable = !isExplicitlyUnauthorized && (
+          err instanceof ApiNetworkError ||
+          (typeof navigator !== 'undefined' && !navigator.onLine)
+        );
+
+        // On a cold offline start, restore only the cached identity for this
+        // browser. No access token is persisted; all writes remain queued in
+        // IndexedDB and the server revalidates permissions when syncing.
+        if (networkUnavailable) {
+          const hintedUserId = getOfflineUserHint();
+          if (hintedUserId) {
+            setOfflineUserScope(hintedUserId);
+            const cachedUser = await getCachedUser().catch(() => undefined);
+            if (cachedUser && cachedUser.id === hintedUserId) {
+              setSession(null);
+              setApiAccessToken(null);
+              setUser(userFromOfflineRecord(cachedUser));
+              return;
+            }
+          }
+        }
+
+        // A server-side 401 still means the session needs a real sign-in.
         clearAuth();
       } finally {
         setIsLoading(false);
@@ -176,9 +235,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [api]);
 
   const updateUser = useCallback((userData: Partial<User>) => {
-    setUser((prev) => (prev ? { ...prev, ...userData } : null));
-    setSession((prev) => (prev ? { ...prev, user: { ...prev.user, ...userData } } : null));
-  }, []);
+    if (!user) return;
+    const updatedUser = { ...user, ...userData };
+    setUser(updatedUser);
+    setSession((prev) => (prev ? { ...prev, user: updatedUser } : null));
+    void cacheUser(userToOfflineRecord(updatedUser)).catch((cacheError) => {
+      console.warn('[Pazito] No se pudo actualizar el perfil local:', cacheError);
+    });
+  }, [user]);
 
   return (
     <AuthContext.Provider

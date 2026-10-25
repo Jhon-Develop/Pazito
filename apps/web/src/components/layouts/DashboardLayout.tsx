@@ -17,6 +17,7 @@ import { useAuth } from '../../lib/hooks';
 import { isDemoMode } from '../../lib/api';
 import { Button, Avatar, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '../ui';
 import { cn } from '../../lib/utils';
+import PwaInstallPrompt from '../app/PwaInstallPrompt';
 
 const navigation = [
   { name: 'Inicio', href: '/dashboard', icon: LayoutDashboard },
@@ -185,6 +186,7 @@ export default function DashboardLayout() {
         )}
         {/* Page content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8" id="main-content" role="main">
+          <PwaInstallPrompt />
           <Outlet />
         </main>
       </div>

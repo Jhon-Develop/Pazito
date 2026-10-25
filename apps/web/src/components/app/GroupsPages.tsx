@@ -6,7 +6,7 @@ import { getApiClient, ApiRequestError } from '../../lib/api';
 import type { Group, GroupMember, GroupPermission, Invitation, Expense, GroupBalance, GroupPermissionsResponse } from '../../lib/api/types';
 import { formatCurrency } from '../../lib/format/currency';
 import { formatDate } from '../../lib/format/date';
-import { cacheGroups, getCachedGroups } from '../../lib/offline';
+import { cacheGroups, cacheServerExpenses, getCachedGroup, getCachedGroups, getCachedServerExpenses, getOfflineExpenses, toOfflineExpenseView } from '../../lib/offline';
 import { useAuth } from '../../lib/hooks';
 import { Button, Input, Select, Textarea, useToast } from '../ui';
 import { EmptyState, ErrorMessage, ErrorState, LoadingState, PageHeading, Panel, downloadBlob, getErrorMessage } from './Common';
@@ -71,21 +71,65 @@ export function GroupFormPage({ edit = false }: { edit?: boolean }) {
 
 export function GroupDetailPage() {
   const { groupId = '' } = useParams(); const navigate = useNavigate(); const { user } = useAuth(); const { addToast } = useToast();
-  const [group, setGroup] = useState<Group | null>(null); const [members, setMembers] = useState<GroupMember[]>([]); const [expenses, setExpenses] = useState<Expense[]>([]); const [balance, setBalance] = useState<GroupBalance | null>(null); const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [group, setGroup] = useState<Group | null>(null); const [members, setMembers] = useState<GroupMember[]>([]); const [expenses, setExpenses] = useState<Array<Expense & { offlinePending?: boolean }>>([]); const [usingOfflineCache, setUsingOfflineCache] = useState(false); const [balance, setBalance] = useState<GroupBalance | null>(null); const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null); const [inviteEmail, setInviteEmail] = useState(''); const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member'); const [inviteExpiry, setInviteExpiry] = useState('7'); const [inviteLoading, setInviteLoading] = useState(false); const [newInvitationUrl, setNewInvitationUrl] = useState<string | null>(null); const [permissions, setPermissions] = useState<GroupPermissionsResponse['roles'] | null>(null); const [permissionRole, setPermissionRole] = useState<'admin' | 'member'>('member'); const [permissionLoading, setPermissionLoading] = useState(false); const [showPermissions, setShowPermissions] = useState(false); const [reportLoading, setReportLoading] = useState(false); const [newOwnerUserId, setNewOwnerUserId] = useState(''); const [ownershipLoading, setOwnershipLoading] = useState(false); const [groupActionLoading, setGroupActionLoading] = useState(false);
 
   const load = useCallback(async () => { if (!groupId) return; setLoading(true); setError(null); const api = getApiClient();
     try {
       const [g, m, e, b] = await Promise.all([api.getGroup(groupId), api.getGroupMembers(groupId, { page: 1, limit: 100 }), api.getExpenses({ groupId, page: 1, limit: 10 }), api.getGroupBalance(groupId)]);
-      setGroup(g); setMembers(m.data); setExpenses(e.data); setBalance(b);
-      await cacheGroups([{ id: g.id, name: g.name, description: g.description ?? undefined, currency: g.currency, members: m.data.map(member => ({ userId: member.userId, name: member.user.name, avatarUrl: member.user.avatarUrl ?? undefined, role: member.role })), cachedAt: new Date().toISOString() }]);
+      setUsingOfflineCache(false);
+      setGroup(g); setMembers(m.data); setBalance(b);
+      const localPending = (await getOfflineExpenses(groupId).catch(() => []))
+        .filter(item => !item.synced)
+        .map(item => toOfflineExpenseView(item, item.paidBy === user?.id ? (user?.name || 'Tú') : `Miembro ${item.paidBy.slice(0, 8)}`));
+      const serverExpenseIds = new Set(e.data.map(item => item.id));
+      setExpenses([...e.data, ...localPending.filter(item => !serverExpenseIds.has(item.id))]);
+      await Promise.all([
+        cacheGroups([{ id: g.id, name: g.name, description: g.description ?? undefined, currency: g.currency, members: m.data.map(member => ({ userId: member.userId, name: member.user.name, avatarUrl: member.user.avatarUrl ?? undefined, role: member.role })), cachedAt: new Date().toISOString() }]),
+        cacheServerExpenses(e.data).catch(() => undefined),
+      ]);
       if (g.userRole === 'owner' || g.userRole === 'admin') {
         const inv = await api.getGroupInvitations(groupId).catch(() => []); setInvitations(inv);
         const perms = await api.getGroupPermissions(groupId).catch(() => null); if (perms?.roles) setPermissions(perms.roles);
       } else { setInvitations([]); setPermissions(null); }
-    } catch (err) { setError(getErrorMessage(err, 'No se pudo cargar el grupo.')); }
+    } catch (err) {
+      const cached = await getCachedGroup(groupId).catch(() => undefined);
+      if (cached) {
+        const cachedMembers: GroupMember[] = cached.members.map((member, index) => ({
+          id: `${cached.id}-cached-member-${index}`,
+          groupId: cached.id,
+          userId: member.userId,
+          role: member.role as GroupMember['role'],
+          joinedAt: cached.cachedAt,
+          user: { id: member.userId, name: member.name, email: '', avatarUrl: member.avatarUrl },
+        }));
+        const [serverExpenses, localExpenses] = await Promise.all([
+          getCachedServerExpenses(groupId).catch(() => []),
+          getOfflineExpenses(groupId).catch(() => []),
+        ]);
+        const pendingLocal = localExpenses.filter(item => !item.synced).map(item =>
+          toOfflineExpenseView(item, item.paidBy === user?.id ? (user?.name || 'Tú') : `Miembro ${item.paidBy.slice(0, 8)}`)
+        );
+        const serverIds = new Set(serverExpenses.map(item => item.id));
+        const currentMember = cachedMembers.find(member => member.userId === user?.id);
+        setGroup({
+          id: cached.id, name: cached.name, description: cached.description ?? null, currency: cached.currency,
+          createdBy: user?.id ?? '', createdAt: cached.cachedAt, updatedAt: cached.cachedAt,
+          memberCount: cachedMembers.length, userRole: currentMember?.role,
+        });
+        setMembers(cachedMembers);
+        setExpenses([...serverExpenses, ...pendingLocal.filter(item => !serverIds.has(item.id))]);
+        setBalance(null);
+        setInvitations([]);
+        setPermissions(null);
+        setUsingOfflineCache(true);
+        setError('Sin conexión: consulta datos guardados y registra gastos locales. Balances y cambios de grupo requieren conexión.');
+      } else {
+        setError(getErrorMessage(err, 'No se pudo cargar el grupo.'));
+      }
+    }
     finally { setLoading(false); }
-  }, [groupId]);
+  }, [groupId, user?.id, user?.name]);
   useEffect(() => { void load(); }, [load]);
 
   const createInvitation = async (event: React.FormEvent) => { event.preventDefault(); setInviteLoading(true); setError(null); try { const invitation = await getApiClient().inviteMember(groupId, { email: inviteEmail.trim() || undefined, role: inviteRole, expiresInDays: Number(inviteExpiry) }); setNewInvitationUrl(invitation.invitationUrl ?? null); setInvitations(prev => [invitation, ...prev]); setInviteEmail(''); addToast({ type: 'success', title: 'Invitación creada', message: 'Copia el enlace y compártelo con la persona invitada.' }); } catch (err) { setError(getErrorMessage(err, 'No se pudo crear la invitación.')); } finally { setInviteLoading(false); } };
@@ -124,30 +168,75 @@ export function GroupDetailPage() {
   if (!group) return <div className="mx-auto max-w-4xl"><ErrorState message={error ?? 'No se encontró el grupo.'} onRetry={load} /><Link to="/groups" className="btn btn-secondary mt-4 inline-flex">Volver a grupos</Link></div>;
   const isManager = group.userRole === 'owner' || group.userRole === 'admin';
   return <div className="mx-auto max-w-7xl"><Link to="/groups" className="mb-4 inline-flex items-center text-sm text-text-secondary hover:text-text-primary"><ArrowLeft className="mr-2 h-4 w-4" />Todos los grupos</Link>
-    <PageHeading title={group.name} description={group.description || 'Grupo de gastos compartidos'} action={<div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={() => void downloadReport('csv')} loading={reportLoading}><Download className="mr-2 h-4 w-4" />Exportar CSV</Button>{isManager && <Link to={`/groups/${groupId}/edit`} className="btn btn-secondary"><Edit3 className="mr-2 h-4 w-4" />Editar</Link>}{group.userRole === 'owner' ? <Button variant="danger" loading={groupActionLoading} onClick={() => void archiveGroup()}><Archive className="mr-2 h-4 w-4" />Archivar</Button> : <Button variant="secondary" onClick={() => { const self = members.find(member => member.userId === user?.id); if (self) void removeMember(self); }}><ArrowLeft className="mr-2 h-4 w-4" />Salir del grupo</Button>}<Link to={`/groups/${groupId}/expenses/new`} className="btn btn-primary"><Plus className="mr-2 h-4 w-4" />Nuevo gasto</Link></div>} />
+    <PageHeading title={group.name} description={group.description || 'Grupo de gastos compartidos'} action={<div className="flex flex-wrap gap-2">{!usingOfflineCache && <Button variant="secondary" onClick={() => void downloadReport('csv')} loading={reportLoading}><Download className="mr-2 h-4 w-4" />Exportar CSV</Button>}{!usingOfflineCache && isManager && <Link to={`/groups/${groupId}/edit`} className="btn btn-secondary"><Edit3 className="mr-2 h-4 w-4" />Editar</Link>}{!usingOfflineCache && (group.userRole === 'owner' ? <Button variant="danger" loading={groupActionLoading} onClick={() => void archiveGroup()}><Archive className="mr-2 h-4 w-4" />Archivar</Button> : <Button variant="secondary" onClick={() => { const self = members.find(member => member.userId === user?.id); if (self) void removeMember(self); }}><ArrowLeft className="mr-2 h-4 w-4" />Salir del grupo</Button>)}<Link to={`/groups/${groupId}/expenses/new`} className="btn btn-primary"><Plus className="mr-2 h-4 w-4" />Nuevo gasto</Link></div>} />
     {error && <div className="mb-4"><ErrorMessage message={error} /></div>}
     <div className="grid gap-4 sm:grid-cols-3"><SmallStat label="Moneda del grupo" value={group.currency} /><SmallStat label="Miembros activos" value={String(members.length)} /><SmallStat label="Gastos recientes" value={String(expenses.length)} /></div>
     <div className="mt-6 grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
       <Panel title="Gastos recientes" description="Los movimientos más recientes del grupo" action={<Link to={`/expenses?groupId=${groupId}`} className="text-sm font-semibold text-brand-700 hover:underline">Ver todos</Link>}>
-        {!expenses.length ? <EmptyState title="Este grupo todavía no tiene gastos" description="Registra una compra, una factura o cualquier pago compartido." actionLabel="Registrar gasto" actionTo={`/groups/${groupId}/expenses/new`} /> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-border-primary text-xs uppercase tracking-wide text-text-tertiary"><th className="pb-3 pr-3 font-medium">Gasto</th><th className="pb-3 pr-3 font-medium">Fecha</th><th className="pb-3 text-right font-medium">Importe</th></tr></thead><tbody className="divide-y divide-border-primary">{expenses.map(expense => <tr key={expense.id}><td className="py-3 pr-3"><Link to={`/groups/${groupId}/expenses/${expense.id}/edit`} className="font-medium text-text-primary hover:text-brand-700">{expense.title}</Link><p className="text-xs text-text-secondary">Pagó {expense.paidByName}</p></td><td className="whitespace-nowrap py-3 pr-3 text-text-secondary">{formatDate(expense.date, 'd MMM yyyy')}</td><td className="whitespace-nowrap py-3 text-right font-semibold">{formatCurrency(expense.amountMinor, { currency: expense.currency })}</td></tr>)}</tbody></table></div>}
+        {!expenses.length ? <EmptyState title="Este grupo todavía no tiene gastos" description="Registra una compra, una factura o cualquier pago compartido." actionLabel="Registrar gasto" actionTo={`/groups/${groupId}/expenses/new`} /> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-border-primary text-xs uppercase tracking-wide text-text-tertiary"><th className="pb-3 pr-3 font-medium">Gasto</th><th className="pb-3 pr-3 font-medium">Fecha</th><th className="pb-3 text-right font-medium">Importe</th></tr></thead><tbody className="divide-y divide-border-primary">{expenses.map(expense => <tr key={expense.id}><td className="py-3 pr-3">{expense.offlinePending ? <span className="font-medium text-text-primary">{expense.title}</span> : <Link to={`/groups/${groupId}/expenses/${expense.id}/edit`} className="font-medium text-text-primary hover:text-brand-700">{expense.title}</Link>}<p className="text-xs text-text-secondary">Pagó {expense.paidByName}</p>{expense.offlinePending && <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">Sin sincronizar</span>}</td><td className="whitespace-nowrap py-3 pr-3 text-text-secondary">{formatDate(expense.date, 'd MMM yyyy')}</td><td className="whitespace-nowrap py-3 text-right font-semibold">{formatCurrency(expense.amountMinor, { currency: expense.currency })}</td></tr>)}</tbody></table></div>}
       </Panel>
-      <div className="space-y-6"><Panel title="Balance del grupo" description="Saldos netos, sin mezclar monedas."><div className="mb-4 flex items-end justify-between"><div><p className="text-sm text-text-secondary">Gasto acumulado</p><p className="text-2xl font-bold text-text-primary">{formatCurrency(balance?.totalExpensesMinor ?? 0, { currency: group.currency })}</p></div><Link to={`/groups/${groupId}/balances`} className="text-sm font-semibold text-brand-700 hover:underline">Detalle</Link></div><div className="divide-y divide-border-primary">{(balance?.balances ?? []).map(item => <div key={item.userId} className="flex items-center justify-between gap-3 py-2.5"><span className="truncate text-sm text-text-secondary">{item.userName}{item.userId === user?.id ? ' (tú)' : ''}</span><span className={`whitespace-nowrap text-sm font-semibold ${item.balanceMinor > 0 ? 'text-status-success' : item.balanceMinor < 0 ? 'text-error-600' : 'text-text-secondary'}`}>{formatCurrency(item.balanceMinor, { currency: group.currency })}</span></div>)}</div></Panel>
-        <Panel title="Exportar informe" description="Descarga el historial del grupo para guardarlo o compartirlo."><div className="grid grid-cols-2 gap-3"><Button variant="secondary" onClick={() => void downloadReport('csv')} loading={reportLoading}><FileText className="mr-2 h-4 w-4" />CSV</Button><Button variant="secondary" onClick={() => void downloadReport('pdf')} loading={reportLoading}><Download className="mr-2 h-4 w-4" />PDF</Button></div></Panel>
+      <div className="space-y-6">
+        <Panel title="Balance del grupo" description="Saldos netos, sin mezclar monedas.">
+          {usingOfflineCache ? (
+            <p className="text-sm text-text-secondary">
+              El balance no se calcula localmente. Cuando vuelva la conexión y los gastos pendientes se sincronicen,
+              podrás consultar los saldos actualizados.
+            </p>
+          ) : (
+            <>
+              <div className="mb-4 flex items-end justify-between">
+                <div>
+                  <p className="text-sm text-text-secondary">Gasto acumulado</p>
+                  <p className="text-2xl font-bold text-text-primary">
+                    {formatCurrency(balance?.totalExpensesMinor ?? 0, { currency: group.currency })}
+                  </p>
+                </div>
+                <Link to={`/groups/${groupId}/balances`} className="text-sm font-semibold text-brand-700 hover:underline">
+                  Detalle
+                </Link>
+              </div>
+              <div className="divide-y divide-border-primary">
+                {(balance?.balances ?? []).map((item) => (
+                  <div key={item.userId} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="truncate text-sm text-text-secondary">
+                      {item.userName}{item.userId === user?.id ? ' (tú)' : ''}
+                    </span>
+                    <span className={`whitespace-nowrap text-sm font-semibold ${item.balanceMinor > 0 ? 'text-status-success' : item.balanceMinor < 0 ? 'text-error-600' : 'text-text-secondary'}`}>
+                      {formatCurrency(item.balanceMinor, { currency: group.currency })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </Panel>
+        {!usingOfflineCache && (
+          <Panel title="Exportar informe" description="Descarga el historial del grupo para guardarlo o compartirlo.">
+            <div className="grid grid-cols-2 gap-3">
+              <Button variant="secondary" onClick={() => void downloadReport('csv')} loading={reportLoading}>
+                <FileText className="mr-2 h-4 w-4" />CSV
+              </Button>
+              <Button variant="secondary" onClick={() => void downloadReport('pdf')} loading={reportLoading}>
+                <Download className="mr-2 h-4 w-4" />PDF
+              </Button>
+            </div>
+          </Panel>
+        )}
       </div>
     </div>
     <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_1fr]">
       <Panel title="Miembros" description="Integrantes que tienen acceso al grupo" action={<span className="rounded-full bg-surface-100 px-2.5 py-1 text-xs font-semibold text-text-secondary">{members.length}</span>}>
-        <div className="divide-y divide-border-primary">{members.map(member => <div key={member.id} className="flex flex-wrap items-center gap-3 py-3 first:pt-0"><div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-50 font-semibold text-brand-700">{member.user.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-text-primary">{member.user.name}{member.userId === user?.id ? ' (tú)' : ''}</p><p className="truncate text-xs text-text-secondary">{member.user.email}</p></div><span className="rounded-full bg-surface-100 px-2 py-1 text-xs text-text-secondary">{member.role === 'owner' ? 'Propietario' : member.role === 'admin' ? 'Admin' : 'Miembro'}</span>{isManager && member.role !== 'owner' && <div className="flex items-center gap-2"><select aria-label={`Rol de ${member.user.name}`} value={member.role} className="input w-28 py-1 text-xs" onChange={event => void changeRole(member, event.target.value as 'admin' | 'member')}><option value="member">Miembro</option><option value="admin">Admin</option></select><button className="rounded-lg p-2 text-error-600 hover:bg-error-50" aria-label={member.userId === user?.id ? 'Salir del grupo' : `Retirar a ${member.user.name}`} onClick={() => void removeMember(member)}><Trash2 className="h-4 w-4" /></button></div>}</div>)}</div>
+        <div className="divide-y divide-border-primary">{members.map(member => <div key={member.id} className="flex flex-wrap items-center gap-3 py-3 first:pt-0"><div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-50 font-semibold text-brand-700">{member.user.name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-text-primary">{member.user.name}{member.userId === user?.id ? ' (tú)' : ''}</p><p className="truncate text-xs text-text-secondary">{member.user.email}</p></div><span className="rounded-full bg-surface-100 px-2 py-1 text-xs text-text-secondary">{member.role === 'owner' ? 'Propietario' : member.role === 'admin' ? 'Admin' : 'Miembro'}</span>{!usingOfflineCache && isManager && member.role !== 'owner' && <div className="flex items-center gap-2"><select aria-label={`Rol de ${member.user.name}`} value={member.role} className="input w-28 py-1 text-xs" onChange={event => void changeRole(member, event.target.value as 'admin' | 'member')}><option value="member">Miembro</option><option value="admin">Admin</option></select><button className="rounded-lg p-2 text-error-600 hover:bg-error-50" aria-label={member.userId === user?.id ? 'Salir del grupo' : `Retirar a ${member.user.name}`} onClick={() => void removeMember(member)}><Trash2 className="h-4 w-4" /></button></div>}</div>)}</div>
       </Panel>
-      <Panel title="Invitar personas" description="Comparte un enlace de invitación. La otra persona deberá registrarse o iniciar sesión para aceptarlo."><form onSubmit={createInvitation} className="space-y-3"><Input label="Correo (opcional)" type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="persona@correo.com" /><div className="grid gap-3 sm:grid-cols-2"><Select label="Rol al entrar" value={inviteRole} onChange={e => setInviteRole(e.target.value as 'admin' | 'member')} options={[{ value: 'member', label: 'Miembro' }, { value: 'admin', label: 'Administrador' }]} /><Select label="Caducidad" value={inviteExpiry} onChange={e => setInviteExpiry(e.target.value)} options={[{ value: '1', label: '1 día' }, { value: '7', label: '7 días' }, { value: '14', label: '14 días' }, { value: '30', label: '30 días' }]} /></div><Button type="submit" loading={inviteLoading} disabled={!isManager}><MailPlus className="mr-2 h-4 w-4" />Crear invitación</Button>{!isManager && <p className="text-xs text-text-secondary">Tu rol actual no puede administrar invitaciones.</p>}</form>
+      {!usingOfflineCache && <Panel title="Invitar personas" description="Comparte un enlace de invitación. La otra persona deberá registrarse o iniciar sesión para aceptarlo."><form onSubmit={createInvitation} className="space-y-3"><Input label="Correo (opcional)" type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="persona@correo.com" /><div className="grid gap-3 sm:grid-cols-2"><Select label="Rol al entrar" value={inviteRole} onChange={e => setInviteRole(e.target.value as 'admin' | 'member')} options={[{ value: 'member', label: 'Miembro' }, { value: 'admin', label: 'Administrador' }]} /><Select label="Caducidad" value={inviteExpiry} onChange={e => setInviteExpiry(e.target.value)} options={[{ value: '1', label: '1 día' }, { value: '7', label: '7 días' }, { value: '14', label: '14 días' }, { value: '30', label: '30 días' }]} /></div><Button type="submit" loading={inviteLoading} disabled={!isManager}><MailPlus className="mr-2 h-4 w-4" />Crear invitación</Button>{!isManager && <p className="text-xs text-text-secondary">Tu rol actual no puede administrar invitaciones.</p>}</form>
         {newInvitationUrl && <div className="mt-4 grid gap-3 rounded-xl border border-brand-200 bg-brand-50 p-4 sm:grid-cols-[1fr_auto] sm:items-center"><div className="min-w-0"><p className="font-semibold text-brand-950">Enlace listo para compartir</p><p className="mt-1 break-all text-xs text-brand-800">{newInvitationUrl}</p><Button size="sm" variant="secondary" className="mt-3" onClick={() => { void navigator.clipboard.writeText(newInvitationUrl).then(() => addToast({ type: 'success', title: 'Enlace copiado' })).catch(() => addToast({ type: 'info', title: 'Copia el enlace manualmente' })); }}><Copy className="mr-2 h-4 w-4" />Copiar enlace</Button></div><div className="mx-auto rounded-lg bg-white p-2"><QRCodeSVG value={newInvitationUrl} size={116} level="M" includeMargin /></div></div>}
         {!!invitations.length && <div className="mt-5 border-t border-border-primary pt-4"><h4 className="mb-3 text-sm font-semibold text-text-primary">Invitaciones anteriores</h4><div className="space-y-2">{invitations.map(invitation => <div key={invitation.id} className="flex items-center gap-3 rounded-lg bg-surface-50 p-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{invitation.email || 'Invitación por enlace'}</p><p className="text-xs text-text-secondary">{invitation.status} · vence {formatDate(invitation.expiresAt, 'd MMM yyyy')}</p></div>{invitation.status === 'pending' && <Button size="sm" variant="ghost" onClick={() => void revoke(invitation)}>Revocar</Button>}</div>)}</div></div>}
-      </Panel>
+      </Panel>}
     </div>
-    {group.userRole === 'owner' && <Panel className="mt-6" title="Permisos del grupo" description="Configura qué acciones pueden realizar los administradores y los miembros." action={<Button variant="secondary" size="sm" onClick={() => setShowPermissions(value => !value)}><Settings2 className="mr-2 h-4 w-4" />{showPermissions ? 'Ocultar' : 'Configurar permisos'}</Button>}>
+    {!usingOfflineCache && group.userRole === 'owner' && <Panel className="mt-6" title="Permisos del grupo" description="Configura qué acciones pueden realizar los administradores y los miembros." action={<Button variant="secondary" size="sm" onClick={() => setShowPermissions(value => !value)}><Settings2 className="mr-2 h-4 w-4" />{showPermissions ? 'Ocultar' : 'Configurar permisos'}</Button>}>
       {!showPermissions ? <p className="text-sm text-text-secondary">Los permisos se aplican en el backend: ocultar un botón no concede ni revoca permisos por sí solo.</p> : !permissions ? <p className="text-sm text-text-secondary">No se pudo cargar la matriz de permisos. Vuelve a intentarlo.</p> : <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><Select label="Editar permisos para" value={permissionRole} onChange={e => setPermissionRole(e.target.value as 'admin' | 'member')} options={[{ value: 'member', label: 'Miembro' }, { value: 'admin', label: 'Administrador' }]} className="max-w-xs" /><Button loading={permissionLoading} onClick={() => void savePermissions()}><ShieldCheck className="mr-2 h-4 w-4" />Guardar permisos</Button></div><div className="grid gap-2 md:grid-cols-2">{permissionOptions.filter(option => option.value !== 'permissions:manage').map(option => <label key={option.value} className="flex cursor-pointer items-start gap-3 rounded-lg border border-border-primary p-3 hover:bg-surface-50"><input type="checkbox" className="mt-1 h-4 w-4 accent-brand-600" checked={permissions[permissionRole].includes(option.value)} onChange={event => setPermissions(prev => prev ? { ...prev, [permissionRole]: event.target.checked ? [...new Set([...prev[permissionRole], option.value])] : prev[permissionRole].filter(value => value !== option.value) } : prev)} /><span><span className="block text-sm font-medium text-text-primary">{option.label}</span><span className="mt-0.5 block text-xs text-text-secondary">{option.help}</span></span></label>)}</div></div>}
     </Panel>}
-    {group.userRole === 'owner' && members.some(member => member.userId !== user?.id) && <Panel className="mt-6" title="Propiedad del grupo" description="Transfiere la propiedad antes de salir. El historial financiero permanecerá asociado al grupo."><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><div className="flex-1"><Select label="Nuevo propietario" value={newOwnerUserId} onChange={event => setNewOwnerUserId(event.target.value)} options={[{ value: '', label: 'Selecciona un miembro' }, ...members.filter(member => member.userId !== user?.id).map(member => ({ value: member.userId, label: `${member.user.name} · ${member.role}` }))]} /></div><Button variant="secondary" loading={ownershipLoading} onClick={() => void transferOwnership()}><Users className="mr-2 h-4 w-4" />Transferir propiedad</Button></div></Panel>}
+    {!usingOfflineCache && group.userRole === 'owner' && members.some(member => member.userId !== user?.id) && <Panel className="mt-6" title="Propiedad del grupo" description="Transfiere la propiedad antes de salir. El historial financiero permanecerá asociado al grupo."><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><div className="flex-1"><Select label="Nuevo propietario" value={newOwnerUserId} onChange={event => setNewOwnerUserId(event.target.value)} options={[{ value: '', label: 'Selecciona un miembro' }, ...members.filter(member => member.userId !== user?.id).map(member => ({ value: member.userId, label: `${member.user.name} · ${member.role}` }))]} /></div><Button variant="secondary" loading={ownershipLoading} onClick={() => void transferOwnership()}><Users className="mr-2 h-4 w-4" />Transferir propiedad</Button></div></Panel>}
   </div>;
 }
 

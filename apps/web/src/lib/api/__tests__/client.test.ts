@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createApiClient } from '../client';
+import { ApiNetworkError, createApiClient } from '../client';
 
 const jsonResponse = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), {
@@ -35,6 +35,23 @@ describe('API client', () => {
     expect(parsedUrl.searchParams.get('page')).toBe('2');
     expect(parsedUrl.searchParams.get('limit')).toBe('10');
     expect(new Headers(init.headers).has('Content-Type')).toBe(false);
+  });
+
+  it('treats the service-worker OFFLINE response as a network error for offline queue fallback', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      code: 'OFFLINE',
+      message: 'No hay conexión. Los cambios pendientes se sincronizarán cuando vuelva la conexión.',
+      statusCode: 503,
+    }, 503));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = createApiClient({
+      baseUrl: 'http://localhost:4321/api/v1',
+      getAccessToken: () => null,
+      onUnauthorized: vi.fn(),
+    });
+
+    await expect(api.getGroups({ page: 1, limit: 10 })).rejects.toBeInstanceOf(ApiNetworkError);
   });
 
   it('sends a stable caller-supplied idempotency key for mutations', async () => {

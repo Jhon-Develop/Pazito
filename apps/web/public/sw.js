@@ -7,7 +7,9 @@
  * explicit offline queue, not in the HTTP cache.
  */
 
-const CACHE_NAME = 'pazito-static-v2';
+// Increment this version whenever application source assets change. Activating a
+// new cache removes stale bundles from previously installed PWAs.
+const CACHE_NAME = 'pazito-static-v6';
 const CACHE_PREFIX = 'pazito-';
 const STATIC_ASSETS = [
   '/',
@@ -16,6 +18,8 @@ const STATIC_ASSETS = [
   '/manifest.webmanifest',
   '/favicon.svg',
   '/favicon.ico',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
   '/icons/icon-512.svg',
 ];
 
@@ -28,7 +32,13 @@ self.addEventListener('install', (event) => {
         STATIC_ASSETS.map(async (asset) => {
           try {
             const response = await fetch(asset, { cache: 'reload' });
-            if (response.ok) await cache.put(asset, response);
+            if (response.ok) {
+              await cache.put(asset, response.clone());
+              // Pre-cache the main app's hashed JS/CSS bundle during installation.
+              // Otherwise the HTML might be available offline while the scripts
+              // referenced by that HTML were never fetched under service-worker control.
+              if (asset === '/app/') await cacheAppAssetsFromHtml(cache, response.clone());
+            }
           } catch {
             // Optional asset; the app shell can still be installed.
           }
@@ -80,6 +90,40 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(fetch(request).catch(() => new Response('Sin conexión', { status: 503 })));
 });
 
+
+async function cacheAppAssetsFromHtml(cache, htmlResponse) {
+  let html;
+  try {
+    html = await htmlResponse.text();
+  } catch {
+    return;
+  }
+
+  const candidates = new Set();
+  const attributePattern = /\b(?:src|href)\s*=\s*["']([^"']+)["']/gi;
+  for (const match of html.matchAll(attributePattern)) {
+    try {
+      const assetUrl = new URL(match[1], self.location.origin);
+      if (assetUrl.origin === self.location.origin && isStaticAsset(assetUrl.pathname)) {
+        candidates.add(assetUrl.href);
+      }
+    } catch {
+      // Ignore malformed or unsupported resource references in the shell.
+    }
+  }
+
+  await Promise.all([...candidates].map(async (assetUrl) => {
+    try {
+      const response = await fetch(assetUrl, { cache: 'reload', credentials: 'same-origin' });
+      if (response.ok && response.type !== 'opaque') {
+        await cache.put(assetUrl, response);
+      }
+    } catch {
+      // The rest of the shell should still install when an optional asset fails.
+    }
+  }));
+}
+
 async function cacheFirstStaticAsset(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
@@ -98,9 +142,17 @@ async function cacheFirstStaticAsset(request) {
 
 async function navigationFallback(request) {
   try {
-    // Network-first, but importantly do not cache the response. In particular,
-    // /auth/* and future account pages must not be persisted by this worker.
-    return await fetch(request);
+    // Revalidate the HTML against the origin. A stale app shell can reference
+    // an old JavaScript bundle whose currency rules differ from the current API
+    // contract. The cache is only a fallback when the network cannot be reached.
+    // Do not persist the response here: in particular, /auth/* and future account
+    // pages must never be stored by this worker.
+    return await fetch(request.url, {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-cache',
+      redirect: 'follow',
+    });
   } catch {
     const cache = await caches.open(CACHE_NAME);
     const url = new URL(request.url);

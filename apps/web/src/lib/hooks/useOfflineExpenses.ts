@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useOnlineStatus, usePendingCount } from '../offline';
+import { cacheServerExpenses, useOnlineStatus, usePendingCount } from '../offline';
 import type { CreateExpenseRequest, Expense } from '../api/types';
 import { getApiClient } from '../api/client';
 
@@ -140,8 +140,10 @@ export function useOfflineExpenses() {
           if (serverResponse || operation.type === 'delete_expense') {
             if (operation.type === 'create_expense' && serverResponse) {
               await markExpenseSynced(operation.entityId, serverResponse.id);
+              await cacheServerExpenses([serverResponse]);
             } else if (operation.type === 'update_expense' && serverResponse) {
               await markExpenseSynced(operation.entityId, serverResponse.id);
+              await cacheServerExpenses([serverResponse]);
             } else if (operation.type === 'delete_expense') {
               // For delete, the local item is already removed; only the outbox row remains.
             }
@@ -150,6 +152,7 @@ export function useOfflineExpenses() {
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+          setSyncState((prev) => ({ ...prev, lastSyncError: errorMessage }));
           await import('../offline').then(({ markExpenseSyncFailed, markOperationFailed }) => {
             if (operation.type !== 'delete_expense') {
               markExpenseSyncFailed(operation.entityId, errorMessage);
@@ -182,6 +185,28 @@ export function useOfflineExpenses() {
       return () => clearTimeout(timer);
     }
   }, [isOnline, pendingCount, syncPendingExpenses]);
+
+  // navigator.onLine can remain true when Wi-Fi has no internet access. Retry
+  // on app visibility/focus and periodically while pending work exists so the
+  // queue still syncs when connectivity silently returns.
+  useEffect(() => {
+    if (pendingCount === 0) return;
+
+    const attempt = () => {
+      if (navigator.onLine && document.visibilityState !== 'hidden') {
+        void syncPendingExpenses();
+      }
+    };
+    window.addEventListener('focus', attempt);
+    document.addEventListener('visibilitychange', attempt);
+    const interval = window.setInterval(attempt, 30_000);
+
+    return () => {
+      window.removeEventListener('focus', attempt);
+      document.removeEventListener('visibilitychange', attempt);
+      window.clearInterval(interval);
+    };
+  }, [pendingCount, syncPendingExpenses]);
 
   return {
     isOffline: !isOnline,

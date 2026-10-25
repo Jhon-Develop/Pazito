@@ -5,6 +5,8 @@
  */
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import type { Expense } from '../api/types';
+import { divideCurrency, percentageOfCurrency } from '../format/currency';
 
 // ============================================
 // Types
@@ -67,6 +69,10 @@ export interface OfflineUser {
   name: string;
   email: string;
   avatarUrl?: string;
+  locale?: string;
+  timezone?: string;
+  createdAt?: string;
+  updatedAt?: string;
   groups: string[]; // Group IDs user has access to
   cachedAt: string;
 }
@@ -99,15 +105,21 @@ interface PazitoDB extends DBSchema {
     key: string;
     value: { key: string; value: unknown; updatedAt: string };
   };
+  serverExpenses: {
+    key: string;
+    value: Expense;
+    indexes: { 'by-group': string; 'by-date': string };
+  };
 }
 
 const DB_NAME = 'pazito-offline';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const ANONYMOUS_DB_NAME = `${DB_NAME}-anonymous`;
 let activeUserScope: string | null = null;
 let activeDbName = ANONYMOUS_DB_NAME;
 const QUEUE_CHANGED_EVENT = 'pazito:offline-queue-updated';
 const QUEUE_CHANNEL_NAME = 'pazito-offline-queue';
+const OFFLINE_USER_HINT_KEY = 'pazito:offline-user-id';
 
 function notifyQueueChanged(): void {
   if (typeof window !== 'undefined') {
@@ -132,8 +144,36 @@ let dbInstance: IDBPDatabase<PazitoDB> | null = null;
  * The legacy unscoped `pazito-offline` database is deliberately not auto-assigned
  * to an account because its records do not identify their owner reliably.
  */
+export function getOfflineUserScope(): string | null {
+  return activeUserScope;
+}
+
+/**
+ * Stores only the last account ID (never credentials) so the app can select the
+ * correct account-scoped IndexedDB after a cold start without network access.
+ */
+export function getOfflineUserHint(): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    return localStorage.getItem(OFFLINE_USER_HINT_KEY)?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function setOfflineUserScope(userId: string | null): void {
   const normalizedUserId = userId?.trim() || null;
+
+  if (typeof localStorage !== 'undefined') {
+    try {
+      if (normalizedUserId) localStorage.setItem(OFFLINE_USER_HINT_KEY, normalizedUserId);
+      else localStorage.removeItem(OFFLINE_USER_HINT_KEY);
+    } catch {
+      // IndexedDB still works when localStorage is disabled, but cold offline
+      // account restoration will then require an online authentication.
+    }
+  }
+
   if (normalizedUserId === activeUserScope) return;
 
   dbInstance?.close();
@@ -142,6 +182,8 @@ export function setOfflineUserScope(userId: string | null): void {
   activeDbName = normalizedUserId
     ? `${DB_NAME}-user-${encodeURIComponent(normalizedUserId)}`
     : ANONYMOUS_DB_NAME;
+
+  notifyQueueChanged();
 }
 
 export async function getDB(): Promise<IDBPDatabase<PazitoDB>> {
@@ -173,6 +215,16 @@ export async function getDB(): Promise<IDBPDatabase<PazitoDB>> {
       if (!db.objectStoreNames.contains('groups')) db.createObjectStore('groups', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('user')) db.createObjectStore('user', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('metadata')) db.createObjectStore('metadata', { keyPath: 'key' });
+
+      const serverExpenseStore = db.objectStoreNames.contains('serverExpenses')
+        ? transaction.objectStore('serverExpenses')
+        : db.createObjectStore('serverExpenses', { keyPath: 'id' });
+      if (!serverExpenseStore.indexNames.contains('by-group')) {
+        serverExpenseStore.createIndex('by-group', 'groupId');
+      }
+      if (!serverExpenseStore.indexNames.contains('by-date')) {
+        serverExpenseStore.createIndex('by-date', 'date');
+      }
     },
   });
 
@@ -314,6 +366,64 @@ export async function getOfflineExpenses(groupId?: string): Promise<OfflineExpen
   return db.getAll('expenses');
 }
 
+/** Cache server-confirmed expense DTOs for read-only offline browsing. */
+export async function cacheServerExpenses(expenses: Expense[]): Promise<void> {
+  if (!expenses.length) return;
+  const db = await getDB();
+  const tx = db.transaction('serverExpenses', 'readwrite');
+  for (const expense of expenses) await tx.store.put(expense);
+  await tx.done;
+}
+
+export async function getCachedServerExpenses(groupId?: string): Promise<Expense[]> {
+  const db = await getDB();
+  if (groupId) return db.getAllFromIndex('serverExpenses', 'by-group', groupId);
+  return db.getAll('serverExpenses');
+}
+
+/** Map a locally captured expense to the common UI shape without claiming it is synced. */
+export function toOfflineExpenseView(
+  expense: OfflineExpense,
+  paidByName = 'Tú'
+): Expense & { offlinePending?: boolean } {
+  const equalParts = divideCurrency(expense.amountMinor, expense.splits.length);
+  return {
+    id: expense.serverId || expense.id,
+    groupId: expense.groupId,
+    title: expense.title,
+    description: expense.description ?? null,
+    amountMinor: expense.amountMinor,
+    currency: expense.currency,
+    settlementAmountMinor: expense.amountMinor,
+    settlementCurrency: expense.currency,
+    fxRate: null,
+    fxSource: null,
+    fxAsOf: null,
+    paidBy: expense.paidBy,
+    paidByName,
+    splitType: expense.splitType,
+    splits: expense.splits.map((split, index) => ({
+      userId: split.userId,
+      amountMinor: split.amountMinor ?? (
+        expense.splitType === 'equal'
+          ? (equalParts[index] ?? 0)
+          : expense.splitType === 'percentage' && split.percentage !== undefined
+            ? percentageOfCurrency(expense.amountMinor, split.percentage)
+            : 0
+      ),
+      ...(split.percentage === undefined ? {} : { percentage: split.percentage }),
+    })),
+    categoryId: expense.categoryId ?? null,
+    categoryName: null,
+    categoryColor: null,
+    date: expense.date,
+    createdAt: expense.createdAt,
+    updatedAt: expense.createdAt,
+    settlementStatus: 'pending',
+    offlinePending: !expense.synced,
+  };
+}
+
 export async function getPendingExpenses(): Promise<OfflineExpense[]> {
   const db = await getDB();
   // IndexedDB keys cannot be boolean values; filter records instead of using
@@ -447,7 +557,7 @@ export async function getCachedGroup(id: string): Promise<OfflineGroup | undefin
 // User Caching
 // ============================================
 
-export async function cacheUser(user: OfflineUser): Promise<void> {
+export async function cacheUser(user: Omit<OfflineUser, 'cachedAt'>): Promise<void> {
   const db = await getDB();
   await db.put('user', { ...user, cachedAt: nowISO() });
 }
@@ -586,6 +696,7 @@ export function useOnlineStatus(): boolean {
 
 export function usePendingCount(): number {
   const [count, setCount] = useState(0);
+  const userScope = getOfflineUserScope();
 
   useEffect(() => {
     let active = true;
@@ -614,7 +725,7 @@ export function usePendingCount(): number {
       channel?.removeEventListener('message', updateCount);
       channel?.close();
     };
-  }, []);
+  }, [userScope]);
 
   return count;
 }

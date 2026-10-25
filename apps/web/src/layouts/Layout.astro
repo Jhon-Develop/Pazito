@@ -16,7 +16,7 @@ const apiBaseUrl = import.meta.env.PUBLIC_API_BASE_URL || '/api/v1';
     <meta name="theme-color" content="#14b8a6" />
     <meta name="api-base-url" content={apiBaseUrl} />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="/icons/icon-512.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192.png" />
   </head>
   <body>
     <a href="#main-content" class="skip-link">Saltar al contenido principal</a>
@@ -48,7 +48,26 @@ const apiBaseUrl = import.meta.env.PUBLIC_API_BASE_URL || '/api/v1';
             return;
           }
 
-          navigator.serviceWorker.register('/sw.js').catch((error) => {
+          // When a new worker activates, reload once so all open clients use
+          // the matching HTML/hashed JavaScript bundle instead of an older app
+          // shell that was already running when the deployment completed.
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            window.location.reload();
+          }, { once: true });
+
+          navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((registration) => {
+            // Check on initial load and whenever a suspended mobile PWA returns
+            // to the foreground. This helps old clients notice the new worker
+            // after a deployment without asking users to clear browser storage.
+            const checkForUpdate = () => {
+              if (document.visibilityState === 'visible') {
+                void registration.update().catch(() => undefined);
+              }
+            };
+            void registration.update().catch(() => undefined);
+            document.addEventListener('visibilitychange', checkForUpdate);
+            window.addEventListener('pageshow', checkForUpdate);
+          }).catch((error) => {
             // Do not break app startup if PWA support is unavailable.
             console.warn('[Pazito] Service worker registration failed:', error);
           });

@@ -455,6 +455,14 @@ class ApiClient {
           };
         }
 
+        // The service worker returns this explicit 503 response when a same-origin
+        // API request cannot reach the network. Treat it as a transport outage so
+        // expense creation can enter the IndexedDB outbox instead of being rejected
+        // as an ordinary HTTP error. Other server 5xx errors remain API errors.
+        if (response.status === 503 && errorData.code === 'OFFLINE') {
+          throw new ApiNetworkError(errorData.message || 'Sin conexión: operación pendiente de sincronizar.');
+        }
+
         if (response.status === 401) this.config.onUnauthorized();
         throw ApiRequestError.fromResponse(response, errorData);
       }

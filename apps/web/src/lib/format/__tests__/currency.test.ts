@@ -21,6 +21,13 @@ describe('Currency formatting and ISO-4217 minor units', () => {
     expect(normalizeCurrency(formatCurrency(-5000000, { currency: 'COP' }))).toBe('-$ 50.000');
   });
 
+  it('shows the same COP amount regardless of client: 200,000 pesos are 20,000,000 minor units', () => {
+    const storedAmountMinor = parseCurrencyInput('200000', 'COP');
+    expect(storedAmountMinor).toBe(20_000_000);
+    expect(normalizeCurrency(formatCurrency(storedAmountMinor, { currency: 'COP' }))).toBe('$ 200.000');
+    expect(normalizeCurrency(formatCurrency(20_000_000, { currency: 'COP' }))).toBe('$ 200.000');
+  });
+
   it('uses cents for USD and EUR', () => {
     expect(normalizeCurrency(formatCurrency(150000, { currency: 'USD' }))).toBe('US$ 1.500,00');
     expect(normalizeCurrency(formatCurrency(1000, { currency: 'USD' }))).toBe('US$ 10,00');
