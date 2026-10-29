@@ -14,6 +14,6 @@ async function main() {
     if (existing.some(row => row.name.toLocaleLowerCase('es') === name.toLocaleLowerCase('es'))) continue;
     await db.insert(categories).values({ id: randomUUID(), groupId: null, name, icon, color, isDefault: true, createdBy: null });
   }
-  console.info('✓ Categorías predeterminadas listas. No se creó ninguna cuenta ni dato financiero de demostración.');
+  console.info('Categorías predeterminadas listas. No se creó ninguna cuenta ni dato financiero de demostración.');
 }
 main().catch((error: unknown) => { console.error(error instanceof Error ? error.message : 'Error de seed'); process.exitCode = 1; }).finally(() => closeDatabase());

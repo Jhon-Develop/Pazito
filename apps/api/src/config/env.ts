@@ -4,20 +4,32 @@ import { z } from 'zod';
 const booleanString = z.enum(['true', 'false']).default('false').transform(v => v === 'true');
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  API_HOST: z.string().default('127.0.0.1'), API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  API_HOST: z.string().default('127.0.0.1'), 
+  API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   API_PUBLIC_URL: z.string().url().default('http://localhost:3000'),
   FRONTEND_ORIGINS: z.string().default('http://localhost:4321,http://127.0.0.1:4321'),
+  FRONTEND_PUBLIC_URL: z.string().url().optional(),
   DATABASE_URL: z.string().min(1).default('mysql://pazito:pazito_dev_only@127.0.0.1:3306/pazito'),
   DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(50).default(10),
   SESSION_SECRET: z.string().min(32).default('dev-only-change-this-session-secret-0123456789'),
-  SESSION_COOKIE_NAME: z.string().default('pazito_session'), SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 90).default(168),
+  SESSION_COOKIE_NAME: z.string().default('pazito_session'),
+  SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 90).default(168),
   PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(5).max(120).default(30),
-  EMAIL_TRANSPORT: z.enum(['log', 'smtp', 'disabled']).default('log'), SMTP_HOST: z.string().optional(), SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
-  SMTP_SECURE: booleanString, SMTP_USER: z.string().optional(), SMTP_PASSWORD: z.string().optional(), EMAIL_FROM: z.string().default('Pazito <no-reply@localhost>'),
-  FX_PROVIDER: z.enum(['frankfurter', 'disabled']).default('frankfurter'), FX_API_BASE_URL: z.string().url().default('https://api.frankfurter.dev/v1'),
-  FX_TIMEOUT_MS: z.coerce.number().int().min(500).max(15000).default(3500), FX_CACHE_HOURS: z.coerce.number().int().min(1).max(168).default(24),
-  RECEIPTS_DIR: z.string().default('./var/receipts'), RECEIPTS_MAX_BYTES: z.coerce.number().int().min(1024).max(25 * 1024 * 1024).default(5 * 1024 * 1024),
-  TRUST_PROXY: booleanString, LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  EMAIL_TRANSPORT: z.enum(['log', 'smtp', 'disabled']).default('log'),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_SECURE: booleanString, 
+  SMTP_USER: z.string().optional(), 
+  SMTP_PASSWORD: z.string().optional(), 
+  EMAIL_FROM: z.string().default('Pazito <no-reply@localhost>'),
+  FX_PROVIDER: z.enum(['frankfurter', 'disabled']).default('frankfurter'), 
+  FX_API_BASE_URL: z.string().url().default('https://api.frankfurter.dev/v1'),
+  FX_TIMEOUT_MS: z.coerce.number().int().min(500).max(15000).default(3500), 
+  FX_CACHE_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+  RECEIPTS_DIR: z.string().default('./var/receipts'), 
+  RECEIPTS_MAX_BYTES: z.coerce.number().int().min(1024).max(25 * 1024 * 1024).default(5 * 1024 * 1024),
+  TRUST_PROXY: booleanString, 
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 const parsed = schema.safeParse(process.env);
 if (!parsed.success) {
@@ -33,4 +45,13 @@ if (parsed.data.NODE_ENV === 'production' && parsed.data.EMAIL_TRANSPORT !== 'sm
 if (parsed.data.EMAIL_TRANSPORT === 'smtp' && (!parsed.data.SMTP_HOST || !parsed.data.SMTP_USER || !parsed.data.SMTP_PASSWORD)) {
   throw new Error('EMAIL_TRANSPORT=smtp requiere SMTP_HOST, SMTP_USER y SMTP_PASSWORD');
 }
-export const env = { ...parsed.data, frontendOrigins: parsed.data.FRONTEND_ORIGINS.split(',').map(v => v.trim()).filter(Boolean) };
+const frontendOrigins = parsed.data.FRONTEND_ORIGINS.split(',').map(v => v.trim()).filter(Boolean);
+const fallbackFrontendUrl = parsed.data.NODE_ENV === 'production'
+  ? frontendOrigins.find(origin => origin.startsWith('https://')) ?? frontendOrigins[0]
+  : frontendOrigins[0];
+export const env = {
+  ...parsed.data,
+  frontendOrigins,
+  // Prefer the explicit public URL. On production, prefer HTTPS if it was not set.
+  frontendPublicUrl: (parsed.data.FRONTEND_PUBLIC_URL ?? fallbackFrontendUrl ?? 'http://localhost:4321').replace(/\/+$/, ''),
+};

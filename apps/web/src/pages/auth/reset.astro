@@ -32,7 +32,7 @@ import Layout from '../../layouts/Layout.astro';
                 class="input pr-12"
                 placeholder="Mínimo 12 caracteres"
                 required
-                minlength="8"
+                minlength="12"
               />
               <button
                 type="button"
@@ -230,7 +230,10 @@ import Layout from '../../layouts/Layout.astro';
               credentials: 'include',
             });
 
-            const data = await response.json();
+            let data = /** @type {{ message?: string }} */ ({});
+            if (response.status !== 204 && response.headers.get('content-type')?.includes('application/json')) {
+              data = await response.json();
+            }
 
             if (!response.ok) {
               throw new Error(data.message || 'Error al restablecer la contraseña');
