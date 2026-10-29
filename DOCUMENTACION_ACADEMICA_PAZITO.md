@@ -38,8 +38,7 @@
    - [6.5 Diccionario de casos de uso](#65-diccionario-de-casos-de-uso)
 7. [Anexos — análisis de requisitos](#7-anexos--análisis-de-requisitos)
 8. [Referentes bibliográficos](#8-referentes-bibliográficos)
-9. [Checklist de cobertura de la rúbrica](#9-checklist-de-cobertura-de-la-rúbrica)
-10. [Estado de compilación y pruebas reportado](#10-estado-de-compilación-y-pruebas-reportado)
+9. [Estado de compilación y pruebas reportado](#10-estado-de-compilación-y-pruebas-reportado)
 
 ## Lista de figuras
 
@@ -1150,42 +1149,8 @@ Este backlog sintetiza el alcance. La estimación se debe completar en Jira con 
 
 Las fuentes externas respaldan el uso de tecnologías y prácticas generales; no prueban por sí mismas que Pazito cumpla todos los requisitos. La evidencia de cumplimiento debe provenir del código de la versión evaluada, de pruebas reproducibles y de los resultados observados en el entorno objetivo.
 
----
 
-# 9. Checklist de cobertura de la rúbrica
-
-Leyenda: **[x]** sección desarrollada en este documento; **[ ]** artefacto externo aún pendiente de adjuntar o validar. El checklist informa cobertura documental, no certifica que toda la funcionalidad esté terminada.
-
-- [x] **1. Requerimientos del sistema** — descripción, restricciones y tabla de software/hardware.
-- [x] **1.1. Requerimientos de hardware** — cliente, móvil, equipo de desarrollo, servidor gestionado y base de datos.
-- [x] **1.2. Requerimientos de software** — framework, runtime, herramientas, DB, PWA y proveedores.
-- [x] **2. Ficha de proyecto** — identificadores, problemática, usuarios, tecnología y entregables.
-- [x] **2.1. Planteamiento del problema** — situación, causas y propuesta.
-- [x] **2.2. Objetivo general** — objetivo general explícito.
-- [x] **2.3. Objetivos específicos** — objetivos enumerados y verificables.
-- [x] **2.4. Alcance del proyecto** — incluido, fuera de alcance y entregables.
-- [x] **3. Facilitación gráfica-prototipos** — wireframes de baja fidelidad, flujo Mermaid y lista de capturas que se deben añadir si la rúbrica exige pantallas reales.
-- [x] **4. Matriz de requisitos** — identificadores, prioridad, criterios y estado de referencia.
-- [x] **4.1. Requisitos funcionales e información** — RF-01 a RF-22 y entidades del dominio.
-- [x] **4.2. Requisitos no funcionales** — RNF-01 a RNF-14 con criterios verificables.
-- [x] **5. Plataforma de desarrollo** — entorno local, despliegue y dispositivos finales.
-- [x] **5.1. Sistema operativo** — Windows local según logs; entorno administrado para los servicios publicados.
-- [x] **5.2. Software de desarrollo** — lengমাদের, framework, runtime, DB, testing y herramientas.
-- [x] **6. Diagramas UML — análisis** — despliegue y casos de uso conceptuales representados en Mermaid.
-- [x] **6.1. Infraestructura/diagrama de despliegue** — clientes, web, API, MySQL y almacenamiento local.
-- [x] **6.2. Casos de uso** — actores y casos representados en diagrama.
-- [x] **6.3. Documentación de casos de uso** — doce casos con precondiciones, flujo, excepciones, postcondiciones, diagramas y criterios.
-- [x] **6.4. Diccionario de actores** — actores humanos y sistemas externos descritos y estandarizados.
-- [x] **6.5. Diccionario de casos de uso** — catálogo con identificador, actor, resumen y resultado.
-- [x] **7. Anexos/análisis de requisitos** — mapa de impacto, roadmap, User Story Map, historias y backlog resumido.
-- [x] **8. Referentes bibliográficos** — documentación oficial y artefactos internos.
-- [ ] **Evidencia visual final** — insertar capturas propias de pantallas en la versión que se evaluará y numerarlas como figuras.
-- [ ] **Evidencia de aceptación** — ejecutar la batería final después de corregir los errores recogidos en la sección 10 y anexar logs resumidos/fecha/versión.
-- [ ] **Paginación definitiva** — renderizar/convertir a PDF si se solicita paginación; las páginas cambian según el editor y no deben copiarse de una plantilla vacía.
-
----
-
-# 10. Estado de compilación y pruebas reportado
+# 9. Estado de compilación y pruebas reportado
 
 Esta tabla reproduce el resultado aportado por el estudiante antes de aplicar las correcciones sugeridas a continuación.
 
@@ -1196,18 +1161,3 @@ Esta tabla reproduce el resultado aportado por el estudiante antes de aplicar la
 | `bun run test:web` | 39 pasaron, 9 fallaron de 48 | Cinco fallos de moneda y cuatro de fechas. |
 | `bun run test:api` | 12 pasaron de 12 | Las suites de API aportadas pasaron en esa ejecución. |
 | `bun run typecheck` | Falló con cuatro errores | Dos errores de retorno asíncrono en `DashboardPage.tsx` y dos errores por falta de tipos directos de `react-dom`. |
-
-### Fallos de moneda
-
-El runtime reportó `getCurrencyFractionDigits('COP')` igual a cero, mientras que los tests y la convención interna del proyecto requieren dos unidades decimales de almacenamiento y formato visual sin decimales. Esto provoca que `20.000.000` unidades menores se traten como pesos enteros y se vean como `$ 20.000.000` en vez de `$ 200.000`. Se recomienda fijar explícitamente los exponentes de las monedas probadas (`COP: 2`, `USD: 2`, `EUR: 2`, `JPY: 0`, `BHD: 3`) y reservar `Intl.NumberFormat` como fallback para los demás códigos.
-
-### Fallos de fechas
-
-Las pruebas originales esperan la hora UTC literal `14:30` aunque el proceso corre en una zona horaria UTC-5 y la función de `date-fns` muestra hora local (`09:30`). Son expectativas dependientes de zona horaria, no evidencia suficiente de un error de visualización en producción. Las pruebas deben comparar contra la representación local del mismo `Date`, o fijar explícitamente la zona para un conjunto de pruebas. Para el rango de días, usar fechas construidas localmente y compararlas como fechas locales evita que `new Date('YYYY-MM-DD')` introduzca un instante UTC y desplace el día calendario.
-
-### Errores de TypeScript
-
-1. `mergePendingExpenses` declaraba retorno síncrono `DisplayExpense[]`, pero devolvía una `Promise` y el llamador usaba `.catch`. Debe declararse `async`, esperar `getOfflineExpenses()` y retornar la lista resuelta.
-2. `DropdownMenu.tsx` y `Toast.tsx` importan `createPortal` de `react-dom`, pero `@types/react-dom` no estaba declarado como dependencia directa del workspace web. Debe añadirse `@types/react-dom` a `apps/web/package.json` y al workspace correspondiente de `bun.lock`, después ejecutar `bun install`.
-
-**Estado de esta edición:** los cambios sugeridos se prepararon en la copia de trabajo adjunta al paquete de código, pero no se pudo volver a ejecutar Bun en este entorno de generación. Los resultados de los comandos deben repetirse en el equipo de desarrollo y actualizarse aquí solo después de verificarlos. No se afirma que los fallos estén resueltos en el entorno del usuario hasta que se repitan las pruebas.
