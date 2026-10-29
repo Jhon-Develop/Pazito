@@ -38,7 +38,7 @@
    - [6.5 Diccionario de casos de uso](#65-diccionario-de-casos-de-uso)
 7. [Anexos — análisis de requisitos](#7-anexos--análisis-de-requisitos)
 8. [Referentes bibliográficos](#8-referentes-bibliográficos)
-9. [Estado de compilación y pruebas reportado](#10-estado-de-compilación-y-pruebas-reportado)
+9. [Estado de compilación y pruebas reportado](#9-estado-de-compilación-y-pruebas-reportado)
 
 ## Lista de figuras
 
