@@ -7,9 +7,9 @@
 **Equipo registrado en la documentación previa:** Jonathan David Botina, Samuel Otálvaro y Jhon Edwin Asprilla  
 **Versión documental:** 2.0  
 **Fecha:** 24 de octubre de 2026  
+**Actualización:** 28 de octubre 2026
 **Estado:** documentación de análisis y diseño; las capacidades descritas deben distinguirse de las que han superado pruebas de aceptación.
 
-> **Convención de veracidad.** En este documento se distingue entre (a) decisiones respaldadas por el repositorio o por el historial aportado, (b) requisitos propuestos, (c) valores recomendados que todavía no se han medido y (d) validaciones que siguen pendientes. El hecho de que una función tenga código o que exista una URL pública no demuestra por sí solo que todos sus flujos estén aceptados para producción.
 
 ## Tabla de contenido
 
@@ -383,7 +383,7 @@ Pazito debe poder abrirse desde navegadores modernos en escritorio y móvil. Par
 | Astro | Build y publicación estática de rutas web | `apps/web` genera `apps/web/dist` |
 | React | Componentes y páginas interactivas | Componentes dentro de `apps/web/src` |
 | Tailwind CSS | Sistema de estilos responsive | Dependencia de frontend |
-| Node.js + Express | API REST | Entrada principal `apps/api/src/server.ts` y configuración en `apps/api/src/app.ts` |
+| Node.js + Express | API REST y lógica de negocio | Backend TypeScript organizado por módulos. |
 | Zod | Validación estructural de entradas y contratos | Presente en paquetes web/API/contratos |
 | Drizzle ORM / drizzle-kit | Mapeo de tablas y migraciones | Esquema `apps/api/src/infrastructure/database/schema.ts`; configuración y migraciones en `apps/api/database` |
 | MySQL | Persistencia relacional | Clever Cloud; no compartir `DATABASE_URL` |
@@ -413,49 +413,28 @@ Los comandos deben ejecutarse en la raíz del monorepo. `bun run build` verifica
 
 ## 6.1. Infraestructura y diagrama de despliegue
 
-El siguiente esquema se presenta en Mermaid para su visualización directa en lectores compatibles. El bloque PlantUML posterior ofrece una representación más cercana a un diagrama UML de despliegue si el evaluador requiere ese formato.
+El siguiente esquema se presenta en Mermaid para su visualización directa y representa la arquitectura técnica funcional de despliegue de la aplicación.
 
 ```mermaid
-flowchart TB
-    subgraph Clientes[Dispositivos de usuarios]
-      Desk[Navegador de escritorio]
-      Mobile[Navegador móvil / PWA]
-      Local[(IndexedDB + caché del Service Worker)]
-      Mobile --- Local
+flowchart LR
+    subgraph Dispositivo_de_usuario ["Dispositivo de usuario"]
+        Client["Navegador / PWA"]
+        LocalDB[("IndexedDB")]
+        SW["Service Worker + Cache Storage"]
+        Client --- LocalDB
+        Client --- SW
     end
-    subgraph Render[Entorno administrado de Render]
-      Web[Frontend estático Astro/React]
-      API[API Node.js / Express]
+    subgraph Entorno_Render ["Render"]
+        Web["Frontend estático Astro/React"]
+        API["API Node.js / Express"]
     end
-    DB[(MySQL en Clever Cloud)]
-    Desk -->|HTTPS| Web
-    Mobile -->|HTTPS| Web
-    Web -->|REST / JSON| API
-    API -->|Conexión SQL con credenciales de entorno| DB
-    Mobile -.->|Gastos pendientes se sincronizan cuando hay conexión| API
-```
+    DB[("MySQL administrado en Clever Cloud")]
 
-```plantuml
-@startuml
-left to right direction
-node "Dispositivo de usuario" {
-  artifact "Navegador / PWA" as Client
-  database "IndexedDB" as LocalDB
-  artifact "Service Worker + Cache Storage" as SW
-  Client -- LocalDB
-  Client -- SW
-}
-node "Render" {
-  artifact "Frontend estático Astro/React" as Web
-  node "API Node.js / Express" as API
-}
-database "MySQL administrado en Clever Cloud" as DB
-Client --> Web : HTTPS
-Client --> API : REST/JSON HTTPS
-API --> DB : SQL / TLS según configuración
-Client ..> LocalDB : guardar operaciones pendientes
-Client ..> API : sincronización idempotente al recuperar red
-@enduml
+    Client -->|HTTPS| Web
+    Client -->|REST/JSON HTTPS| API
+    API -->|SQL / TLS según configuración| DB
+    Client -.->|guardar operaciones pendientes| LocalDB
+    Client -.->|sincronización idempotente al recuperar red| API
 ```
 
 **Figura 5.** Diagrama lógico de despliegue de Pazito.
@@ -466,105 +445,105 @@ Client ..> API : sincronización idempotente al recuperar red
 
 ### Diagrama general
 
-El diagrama Mermaid es una vista legible en GitHub; el diagrama PlantUML permite exportar un diagrama de casos de uso con notación UML si se entrega en PDF/imagen.
-
 ```mermaid
-flowchart LR
-    U[Usuario registrado]
-    O[Propietario/administrador]
-    I[Invitado]
-    S[Servicio de sincronización PWA]
+usecase-beta
+    actor Visitante("Visitante")
+    actor CD("Compañeros de departamento")
+    actor P("Parejas")
+    actor F("Familiares")
+    actor GV("Grupos de viajeros")
+    actor OE("Organizadores de eventos y salidas")
+    
+    U1("CU-01 Registrar usuario e iniciar sesión")
+    U2("CU-02 Crear grupo")
+    U3("CU-03 Invitar miembro")
+    U4("CU-04 Registrar y repartir gasto en línea")
+    U5("CU-05 Crear gasto offline")
+    U6("CU-06 Sincronizar pendientes")
+    U7("CU-07 Consultar historial y filtrar")
+    U8("CU-08 Consultar balance")
+    U9("CU-09 Declarar/confirmar liquidación")
+    U10("CU-10 Consultar recibo/exportar")
+    U11("CU-11 Mantener perfil")
+    U12("CU-12 Administrar permisos")
 
-    UC1([Gestionar cuenta y perfil])
-    UC2([Crear y administrar grupo])
-    UC3([Invitar o aceptar invitación])
-    UC4([Registrar y repartir gasto])
-    UC5([Consultar historial y filtros])
-    UC6([Consultar balance])
-    UC7([Declarar/confirmar liquidación])
-    UC8([Adjuntar recibo y exportar])
-    UC9([Crear gasto offline])
-    UC10([Sincronizar pendientes])
-    UC11([Administrar permisos])
-
-    U --- UC1
-    U --- UC2
-    U --- UC3
-    U --- UC4
-    U --- UC5
-    U --- UC6
-    U --- UC7
-    U --- UC8
-    U --- UC9
-    O --- UC2
-    O --- UC11
-    O --- UC8
-    I --- UC3
-    S --- UC10
-    UC9 --> UC10
-```
-----------
-```mermaid
-graph LR
-    classDef actor fill:#f9f,stroke:#333,stroke-width:2px;
-
-    Visitante([Visitante])
-    User([Usuario registrado])
-    Owner([Propietario / administrador])
-    Invitado([Invitado])
-    Sync([Servicio de sincronización PWA])
-
-    subgraph Pazito
-        U1[Gestionar cuenta y perfil]
-        U2[Crear grupo]
-        U3[Invitar / aceptar invitación]
-        U4[Registrar y repartir gasto]
-        U5[Consultar historial]
-        U6[Consultar balance]
-        U7[Declarar/confirmar liquidación]
-        U8[Consultar recibo / exportar]
-        U9[Guardar gasto offline]
-        U10[Sincronizar pendientes]
-        U11[Administrar permisos]
-    end
-
+    
     Visitante --> U1
-    User --> U1
-    User --> U2
-    User --> U3
-    User --> U4
-    User --> U5
-    User --> U6
-    User --> U7
-    User --> U8
-    User --> U9
-    Owner --> U2
-    Owner --> U11
-    Owner --> U8
-    Invitado --> U3
-    Sync --> U10
-    U9 -.->|include| U10
+    
+    CD --> U1
+    CD --> U2
+    CD --> U3
+    CD --> U4
+    CD --> U5
+    CD --> U6
+    CD --> U7
+    CD --> U8
+    CD --> U9
+    CD --> U10
+    CD --> U11
+    CD --> U12
+
+    P --> U1
+    P --> U2
+    P --> U4
+    P --> U8
+
+    F --> U1
+    F --> U2
+    F --> U4
+    F --> U7
+    F --> U8
+
+    GV --> U1
+    GV --> U2
+    GV --> U3
+    GV --> U4
+    GV --> U5
+    GV --> U6
+    GV --> U8
+    GV --> U9
+
+    OE --> U1
+    OE --> U2
+    OE --> U3
+    OE --> U4
+    OE --> U7
+    OE --> U8
+    OE --> U10
+    OE --> U12
 ```
 
-**Figura 6.** Diagrama de casos de uso de Pazito.
-
-### Actores y objetivos principales
-
-- Usuario registrado: administra su perfil y participa en grupos y movimientos permitidos.
-- Propietario/administrador: gestiona miembros, configuración y permisos del grupo.
-- Invitado: utiliza una invitación válida para incorporarse al grupo, después de cumplir las condiciones de registro/autenticación.
-- Servicio de sincronización PWA: reintenta operaciones que ya fueron guardadas localmente; no sustituye al usuario como autoridad de permisos ni ejecuta acciones sin validar la sesión actual.
+**Figura 6.** Diagrama global de casos de uso de Pazito.
 
 ## 6.3. Documentación de casos de uso
 
 ### CU-01 — Registrar usuario e iniciar sesión
 
+```mermaid
+usecase-beta
+    actor Visitante("Visitante")
+    actor CD("Compañeros de departamento")
+    actor P("Parejas")
+    actor F("Familiares")
+    actor GV("Grupos de viajeros")
+    actor OE("Organizadores de eventos y salidas")
+
+    U1("CU-01 Registrar usuario e iniciar sesión")
+
+    Visitante --> U1
+    CD --> U1
+    P --> U1
+    F --> U1
+    GV --> U1
+    OE --> U1
+```
+
 | Campo | Descripción |
 |---|---|
-| Actor principal | Visitante / usuario |
+| Actor principal | Visitante, Compañeros de departamento, Parejas, Familiares, Grupos de viajeros, Organizadores de eventos y salidas |
 | Objetivo | Obtener una cuenta y una sesión válida para acceder a recursos protegidos. |
-| Precondiciones | El visitante tiene un correo y contraseña válidos; la API y la base de datos están disponibles. |
-| Disparador | El visitante envía el formulario de registro o login. |
+| Precondiciones | El usuario tiene un correo y contraseña válidos; la API y la base de datos están disponibles. |
+| Disparador | El usuario envía el formulario de registro o login. |
 | Flujo principal | 1. El usuario completa el formulario. 2. El frontend valida datos básicos. 3. La API valida y procesa la solicitud. 4. Se crea o valida la cuenta. 5. Se establece la sesión. 6. Se muestra el área autenticada. |
 | Alternativas / errores | Correo duplicado, credenciales inválidas, servicio caído o límite de conexiones; el sistema presenta un error sin revelar secretos. |
 | Postcondición | Existe una sesión válida o el usuario recibe un error controlado. |
@@ -572,9 +551,26 @@ graph LR
 
 ### CU-02 — Crear grupo
 
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor P("Parejas")
+    actor F("Familiares")
+    actor GV("Grupos de viajeros")
+    actor OE("Organizadores de eventos y salidas")
+
+    U2("CU-02 Crear grupo")
+
+    CD --> U2
+    P --> U2
+    F --> U2
+    GV --> U2
+    OE --> U2
+```
+
 | Campo | Descripción |
 |---|---|
-| Actor principal | Usuario autenticado |
+| Actor principal | Compañeros de departamento, Parejas, Familiares, Grupos de viajeros, Organizadores de eventos y salidas |
 | Objetivo | Crear un espacio de gastos compartidos con moneda base. |
 | Precondiciones | Hay sesión válida y conexión a API. |
 | Disparador | El usuario envía el formulario de nuevo grupo. |
@@ -585,9 +581,22 @@ graph LR
 
 ### CU-03 — Invitar miembro
 
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor GV("Grupos de viajeros")
+    actor OE("Organizadores de eventos y salidas")
+
+    U3("CU-03 Invitar miembro")
+
+    CD --> U3
+    GV --> U3
+    OE --> U3
+```
+
 | Campo | Descripción |
 |---|---|
-| Actor principal | Propietario/administrador o miembro con permiso |
+| Actor principal | Compañeros de departamento, Grupos de viajeros, Organizadores de eventos y salidas |
 | Objetivo | Facilitar que otra persona se incorpore a un grupo. |
 | Precondiciones | Sesión válida, pertenencia al grupo y permiso para invitar. |
 | Flujo principal | 1. El actor solicita invitación. 2. API genera una invitación limitada. 3. UI presenta enlace/QR. 4. El destinatario abre el enlace e inicia sesión/registro. 5. API comprueba expiración y usos. 6. La membresía se registra. |
@@ -597,9 +606,26 @@ graph LR
 
 ### CU-04 — Registrar y repartir gasto en línea
 
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor P("Parejas")
+    actor F("Familiares")
+    actor GV("Grupos de viajeros")
+    actor OE("Organizadores de eventos y salidas")
+
+    U4("CU-04 Registrar y repartir gasto en línea")
+
+    CD --> U4
+    P --> U4
+    F --> U4
+    GV --> U4
+    OE --> U4
+```
+
 | Campo | Descripción |
 |---|---|
-| Actor principal | Miembro con permiso de registro |
+| Actor principal | Compañeros de departamento, Parejas, Familiares, Grupos de viajeros, Organizadores de eventos y salidas |
 | Objetivo | Registrar gasto y asignar la parte de cada persona. |
 | Precondiciones | Sesión, grupo y miembros autorizados disponibles en servidor. |
 | Flujo principal | 1. Elige grupo, moneda, importe, pagador, participantes, regla y descripción. 2. UI convierte el importe visible a unidades menores según exponente definido. 3. Envía payload con clave idempotente. 4. API valida permiso, importe y reparto. 5. Persiste gasto y participaciones en transacción. 6. La UI muestra el gasto confirmado. |
@@ -609,9 +635,20 @@ graph LR
 
 ### CU-05 — Crear gasto sin conexión
 
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor GV("Grupos de viajeros")
+
+    U5("CU-05 Crear gasto offline")
+
+    CD --> U5
+    GV --> U5
+```
+
 | Campo | Descripción |
 |---|---|
-| Actor principal | Usuario autenticado anteriormente en el mismo dispositivo |
+| Actor principal | Compañeros de departamento, Grupos de viajeros |
 | Objetivo | No perder el registro de un gasto cuando la red no está disponible. |
 | Precondiciones | PWA instalada/cargada, usuario local recuperable, grupo y participantes previamente almacenados. |
 | Flujo principal | 1. Usuario completa gasto. 2. Cliente detecta que la API no está disponible o devuelve el estado offline definido. 3. Valida localmente los campos. 4. Guarda gasto y clave idempotente en IndexedDB. 5. Muestra “pendiente de sincronizar”. |
@@ -621,9 +658,20 @@ graph LR
 
 ### CU-06 — Sincronizar gastos pendientes
 
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor GV("Grupos de viajeros")
+
+    U6("CU-06 Sincronizar pendientes")
+
+    CD --> U6
+    GV --> U6
+```
+
 | Campo | Descripción |
 |---|---|
-| Actor principal | Servicio de sincronización de la PWA actuando en sesión del usuario |
+| Actor principal | Compañeros de departamento, Grupos de viajeros |
 | Objetivo | Enviar operaciones locales cuando vuelve la conexión. |
 | Precondiciones | Hay conexión, sesión válida y operaciones pendientes con clave idempotente. |
 | Flujo principal | 1. La PWA detecta conectividad/restablecimiento o usuario activa sincronización. 2. Lee cola pendiente. 3. Envía operación con misma clave idempotente. 4. API valida usuario, membresía y payload. 5. API crea o devuelve resultado idempotente. 6. Cliente marca sincronizado y actualiza datos cacheados. |
@@ -633,9 +681,22 @@ graph LR
 
 ### CU-07 — Consultar historial y filtrar
 
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor F("Familiares")
+    actor OE("Organizadores de eventos y salidas")
+
+    U7("CU-07 Consultar historial y filtrar")
+
+    CD --> U7
+    F --> U7
+    OE --> U7
+```
+
 | Campo | Descripción |
 |---|---|
-| Actor principal | Miembro autorizado |
+| Actor principal | Compañeros de departamento, Familiares, Organizadores de eventos y salidas |
 | Objetivo | Encontrar gastos relevantes dentro de grupos accesibles. |
 | Precondiciones | Sesión válida; para resultados recientes se requiere servidor, salvo datos explícitamente cacheados. |
 | Flujo principal | 1. Selecciona filtros. 2. API devuelve página de resultados autorizados. 3. UI muestra importes, estado, fecha y detalles. |
@@ -645,9 +706,26 @@ graph LR
 
 ### CU-08 — Consultar balance
 
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor P("Parejas")
+    actor F("Familiares")
+    actor GV("Grupos de viajeros")
+    actor OE("Organizadores de eventos y salidas")
+
+    U8("CU-08 Consultar balance")
+
+    CD --> U8
+    P --> U8
+    F --> U8
+    GV --> U8
+    OE --> U8
+```
+
 | Campo | Descripción |
 |---|---|
-| Actor principal | Miembro autorizado |
+| Actor principal | Compañeros de departamento, Parejas, Familiares, Grupos de viajeros, Organizadores de eventos y salidas |
 | Objetivo | Conocer saldos por moneda y grupos. |
 | Precondiciones | Acceso al grupo y respuesta actual de API. |
 | Flujo principal | 1. UI solicita balance. 2. API calcula gastos, participaciones y liquidaciones confirmadas. 3. Se devuelven balances por moneda. 4. UI separa lo que el usuario debe de lo que le deben. |
@@ -657,9 +735,20 @@ graph LR
 
 ### CU-09 — Declarar y confirmar liquidación
 
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor GV("Grupos de viajeros")
+
+    U9("CU-09 Declarar/confirmar liquidación")
+
+    CD --> U9
+    GV --> U9
+```
+
 | Campo | Descripción |
 |---|---|
-| Actor principal | Deudor; para confirmar, acreedor/actor permitido |
+| Actor principal | Compañeros de departamento, Grupos de viajeros |
 | Objetivo | Registrar que un saldo se pagó y guardar confirmación. |
 | Precondiciones | Grupo y saldo disponibles; sesión válida. |
 | Flujo principal | 1. Deudor declara el pago. 2. El pago pasa a estado pendiente/declarado. 3. Acreedor confirma, disputa o actor permitido cancela. 4. Se añade evento de historial. 5. Balance oficial se ajusta solo según estados admitidos. |
@@ -667,11 +756,22 @@ graph LR
 | Postcondición | La liquidación tiene un estado trazable. |
 | Criterios | Una liquidación declarada pero no confirmada no reduce el saldo oficial. |
 
-### CU-10 — Exportar o consultar recibo
+### CU-10 — Consultar recibo/exportar
+
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor OE("Organizadores de eventos y salidas")
+
+    U10("CU-10 Consultar recibo/exportar")
+
+    CD --> U10
+    OE --> U10
+```
 
 | Campo | Descripción |
 |---|---|
-| Actor principal | Usuario autorizado del grupo |
+| Actor principal | Compañeros de departamento, Organizadores de eventos y salidas |
 | Objetivo | Conservar evidencia o descargar el informe. |
 | Precondiciones | Sesión válida y permisos sobre gasto/grupo. |
 | Flujo principal | 1. Usuario solicita recibo/informe. 2. Backend valida permisos. 3. Genera o sirve archivo. 4. UI inicia descarga. |
@@ -679,37 +779,85 @@ graph LR
 | Postcondición | Solo un usuario con permiso obtiene el recurso. |
 | Criterios | La exportación no contiene datos de grupos ajenos; en despliegue los archivos usan almacenamiento persistente privado. |
 
+### CU-11 — Mantener perfil
+
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor P("Parejas")
+    actor F("Familiares")
+    actor GV("Grupos de viajeros")
+    actor OE("Organizadores de eventos y salidas")
+
+    U11("CU-11 Mantener perfil")
+
+    CD --> U11
+    P --> U11
+    F --> U11
+    GV --> U11
+    OE --> U11
+```
+
+| Campo | Descripción |
+|---|---|
+| Actor principal | Compañeros de departamento, Parejas, Familiares, Grupos de viajeros, Organizadores de eventos y salidas |
+| Objetivo | Cambiar nombre, avatar y preferencias para mejorar la interacción en la plataforma. |
+| Precondiciones | Sesión válida en el sistema. |
+| Flujo principal | 1. Usuario accede a configuración de perfil. 2. Modifica datos. 3. Envía cambios. 4. API valida los datos. 5. Se actualiza el perfil en servidor. |
+| Alternativas / errores | Formato de archivo inválido para avatar, campos vacíos requeridos. |
+| Postcondición | El perfil actualizado es reflejado en los grupos del usuario. |
+| Criterios | El avatar es cargado y visible; la zona horaria ajusta la visualización de fechas en el frontend. |
+
+### CU-12 — Administrar permisos
+
+```mermaid
+usecase-beta
+    actor CD("Compañeros de departamento")
+    actor OE("Organizadores de eventos y salidas")
+
+    U12("CU-12 Administrar permisos")
+
+    CD --> U12
+    OE --> U12
+```
+
+| Campo | Descripción |
+|---|---|
+| Actor principal | Compañeros de departamento, Organizadores de eventos y salidas |
+| Objetivo | Configurar quién puede editar o administrar las opciones del grupo. |
+| Precondiciones | Sesión válida y el actor debe contar con permisos de administración sobre el grupo. |
+| Flujo principal | 1. Selecciona menú de configuración del grupo. 2. Modifica el nivel de permiso de los miembros seleccionados. 3. Guarda los cambios. 4. La API verifica permisos del actor y aplica los cambios a la base de datos. |
+| Alternativas / errores | Intentar modificar el permiso del creador original, falta de conectividad. |
+| Postcondición | Los miembros cuentan con sus roles y permisos actualizados, restringiendo sus accesos correspondientes. |
+| Criterios | Las pruebas de API deniegan solicitudes de operaciones a miembros si los permisos fueron removidos. |
+
 ## 6.4. Diccionario de actores
 
 | ID | Actor | Tipo | Responsabilidades | Restricciones |
 |---|---|---|---|---|
 | A-01 | Visitante | Humano externo | Consultar páginas públicas, registrarse e iniciar sesión | No accede a rutas autenticadas ni a datos de grupos |
-| A-02 | Usuario registrado | Humano principal | Administrar perfil, crear grupos, registrar gastos y consultar información según membresía | Solo puede ejecutar acciones que el backend autorice |
-| A-03 | Propietario de grupo | Rol de usuario | Administrar grupo y permisos/membresías según reglas del dominio | No puede eludir reglas globales ni leer recursos ajenos a sus permisos |
-| A-04 | Administrador/miembro con permisos | Rol de usuario | Realizar tareas de gestión delegadas | Sus acciones deben coincidir con el permiso asignado para ese grupo |
-| A-05 | Miembro | Rol de usuario | Consultar grupos, gastos y balances; registrar movimientos permitidos | La membresía activa se comprueba en servidor |
-| A-06 | Invitado/destinatario | Humano externo o registrado | Aceptar invitación válida e incorporarse al grupo | Invitación sujeta a caducidad, uso, estado y autenticación |
-| A-07 | Servicio de sincronización PWA | Actor de sistema | Reintentar operaciones locales pendientes | No tiene permisos propios; actúa bajo la identidad actual y la API vuelve a validar |
-| A-08 | API Pazito | Sistema | Validar sesión, permisos, reglas, persistencia, idempotencia y auditoría | No debe confiar en datos del cliente sin validar |
-| A-09 | MySQL | Sistema externo de persistencia | Guardar cuentas, sesiones, grupos y movimientos | Limitado por esquema, integridad referencial, transacciones y límites de conexión |
-| A-10 | Proveedor de correo | Sistema externo opcional | Entregar correo de recuperación/invitación según configuración | Depende del SMTP o proveedor y sus límites; no debe recibir secretos innecesarios |
+| A-02 | Compañeros de departamento | Usuario registrado | Administrar perfil, crear grupos para el hogar, registrar gastos recurrentes y liquidar cuotas | Sus acciones deben coincidir con el permiso asignado para ese grupo |
+| A-03 | Parejas | Usuario registrado | Registrar y consultar gastos compartidos de convivencia o cotidianos | La membresía activa se comprueba en servidor |
+| A-04 | Familiares | Usuario registrado | Crear y administrar espacios de presupuestos familiares, balances equitativos | No puede eludir reglas globales ni leer recursos ajenos a sus permisos |
+| A-05 | Grupos de viajeros | Usuario registrado | Registrar gastos de viajes al instante y de forma asíncrona mediante soporte offline, liquidaciones en distintas monedas | Sujeto a sincronización en conectividad |
+| A-06 | Organizadores de eventos y salidas | Usuario registrado | Invitar y sumar participantes rápidamente, cobrar cuotas de eventos, configurar roles y recibos | Solo puede ejecutar acciones dentro de los límites y alcance del evento/grupo administrado |
 
 ## 6.5. Diccionario de casos de uso
 
 | ID | Caso de uso | Actor principal | Resumen | Resultado esperado |
 |---|---|---|---|---|
-| CU-01 | Registrar usuario e iniciar sesión | Visitante/usuario | Crear cuenta o iniciar sesión mediante API | Sesión válida o error controlado |
-| CU-02 | Crear grupo | Usuario registrado | Crear grupo, membresía inicial y permisos por defecto en transacción | Grupo visible para su propietario |
-| CU-03 | Invitar miembro | Propietario/administrador | Crear enlace/QR con token y expiración | Invitación válida controlada por servidor |
-| CU-04 | Registrar y repartir gasto en línea | Miembro autorizado | Enviar gasto y participaciones | Gasto persistido una sola vez y reparto exacto |
-| CU-05 | Crear gasto offline | Usuario que ya cargó datos | Guardar gasto en IndexedDB | Operación local pendiente y visible |
-| CU-06 | Sincronizar pendientes | Servicio PWA bajo sesión del usuario | Reintentar cola usando idempotencia | Operación aceptada una sola vez o error visible |
-| CU-07 | Consultar historial y filtrar | Miembro autorizado | Buscar y paginar gastos | Datos filtrados y autorizados |
-| CU-08 | Consultar balance | Miembro autorizado | Calcular balances de gastos y liquidaciones confirmadas | Saldos por moneda actualizados |
-| CU-09 | Declarar/confirmar liquidación | Deudor/acreedor | Crear evento y cambiar estado de pago manual | Historial consistente |
-| CU-10 | Consultar recibo/exportar | Miembro autorizado | Obtener archivo/informe permitido | Archivo descargado sin fuga de datos |
-| CU-11 | Mantener perfil | Usuario registrado | Cambiar nombre, avatar y preferencias | Perfil actualizado en el servidor |
-| CU-12 | Administrar permisos | Propietario/administrador | Configurar operaciones permitidas por rol | Cambios respetan reglas del grupo |
+| CU-01 | Registrar usuario e iniciar sesión | Visitante, Compañeros de departamento, Parejas, Familiares, Grupos de viajeros, Organizadores de eventos y salidas | Crear cuenta o iniciar sesión mediante API | Sesión válida o error controlado |
+| CU-02 | Crear grupo | Compañeros de departamento, Parejas, Familiares, Grupos de viajeros, Organizadores de eventos y salidas | Crear grupo, membresía inicial y permisos por defecto en transacción | Grupo visible para su propietario |
+| CU-03 | Invitar miembro | Compañeros de departamento, Grupos de viajeros, Organizadores de eventos y salidas | Crear enlace/QR con token y expiración | Invitación válida controlada por servidor |
+| CU-04 | Registrar y repartir gasto en línea | Compañeros de departamento, Parejas, Familiares, Grupos de viajeros, Organizadores de eventos y salidas | Enviar gasto y participaciones | Gasto persistido una sola vez y reparto exacto |
+| CU-05 | Crear gasto offline | Compañeros de departamento, Grupos de viajeros | Guardar gasto en IndexedDB | Operación local pendiente y visible |
+| CU-06 | Sincronizar pendientes | Compañeros de departamento, Grupos de viajeros | Reintentar cola usando idempotencia | Operación aceptada una sola vez o error visible |
+| CU-07 | Consultar historial y filtrar | Compañeros de departamento, Familiares, Organizadores de eventos y salidas | Buscar y paginar gastos | Datos filtrados y autorizados |
+| CU-08 | Consultar balance | Compañeros de departamento, Parejas, Familiares, Grupos de viajeros, Organizadores de eventos y salidas | Calcular balances de gastos y liquidaciones confirmadas | Saldos por moneda actualizados |
+| CU-09 | Declarar/confirmar liquidación | Compañeros de departamento, Grupos de viajeros | Crear evento y cambiar estado de pago manual | Historial consistente |
+| CU-10 | Consultar recibo/exportar | Compañeros de departamento, Organizadores de eventos y salidas | Obtener archivo/informe permitido | Archivo descargado sin fuga de datos |
+| CU-11 | Mantener perfil | Compañeros de departamento, Parejas, Familiares, Grupos de viajeros, Organizadores de eventos y salidas | Cambiar nombre, avatar y preferencias | Perfil actualizado en el servidor |
+| CU-12 | Administrar permisos | Compañeros de departamento, Organizadores de eventos y salidas | Configurar operaciones permitidas por rol | Cambios respetan reglas del grupo |
 
 ---
 
@@ -720,17 +868,53 @@ graph LR
 **Objetivo:** facilitar el registro y reparto de gastos compartidos con datos consistentes, reduciendo cálculos manuales y pérdida de información cuando la conectividad es intermitente.
 
 ```mermaid
-flowchart TD
-    O[Objetivo: gastos compartidos transparentes, consistentes y recuperables]
-    O --> U1[Roomies / familias / parejas]
-    O --> U2[Amigos / viajeros / organizadores]
-    U1 --> I1[Reducir discusiones y cálculos manuales]
-    U2 --> I2[Registrar gastos en el momento real]
-    I1 --> D1[Grupos, historial y balances por moneda]
-    I2 --> D2[PWA, IndexedDB y cola offline]
-    D1 --> T[Validación de sesión/permisos, transacciones e idempotencia]
-    D2 --> T
-    T --> M[API + MySQL como fuente de verdad]
+flowchart LR
+    classDef nodeStyle fill:#fff,stroke:#333,stroke-width:1px,color:#333;
+
+    Root(["Desplegar una app web/PWA offline-first de gastos compartidos, sin publicidad y con simplificación determinista de deudas."])
+
+    %% ¿Quién?
+    Q1["Compañeros de departamento, parejas familiares"]
+    Q2["Grupos de viajeros"]
+    Q3["Organizadores de eventos y salidas"]
+
+    Root --> Q1
+    Root --> Q2
+    Root --> Q3
+
+    %% ¿Cómo?
+    C1["Reducir la confusión al saldar cuentas del hogar a fin de mes."]
+    C2["Migrar a la app para evitar restricciones gratuitas y anuncios molestos."]
+    C3["Registrar compras compartidas (alquiler, mercado) de forma ágil."]
+    C4["Registrar gastos al instante durante el viaje sin preocuparse por no tener señal."]
+    C5["Sumar participantes y cobrar cuotas rápidamente sin requerir instalaciones pesadas."]
+
+    Q1 --> C1
+    Q1 --> C2
+    Q1 --> C3
+    Q2 --> C4
+    Q3 --> C5
+
+    %% ¿Qué?
+    Que1["Interfaz limpia (Ad-Free) en Astro.js sin banners"]
+    Que2["Uso gratuito sin limites de transacciones o historial"]
+    Que3["Algoritmo que calcula el balance neto del grupo para saldar todas las deudas con el mínimo número de transferencias bancarias."]
+    Que4["Panel de balance simplificado ('Quién paga a quién')"]
+    Que5["Formulario rápido para ingresar gastos con montos iguales o variables"]
+    Que6["Categorización de gastos frecuentes"]
+    Que7["Arquitectura Offline-first con almacenamiento de IndexedDB"]
+    Que8["Motor de sincronización automática en backend al recuperar internet"]
+    Que9["Acceso PWA directo y compartir grupo mediante enlace/código QR"]
+
+    C1 --> Que1
+    C1 --> Que2
+    C2 --> Que3
+    C2 --> Que4
+    C3 --> Que5
+    C3 --> Que6
+    C4 --> Que7
+    C4 --> Que8
+    C5 --> Que9
 ```
 
 **Figura 7.** Mapa de impacto de Pazito.
@@ -831,7 +1015,7 @@ Las métricas son metas de aceptación sugeridas y deben medirse; no se presenta
 - Los importes y los datos incluidos corresponden al grupo/periodo solicitado.
 
 ### US-10 — Ver balances consistentes
-**Como** miembro, **quiero** ver los balances por moneda **para** saber cuánto debo o cuánto me deben.
+**Como** miembro, **quiero** ver balances por moneda **para** saber cuánto debo o cuánto me deben.
 
 - El sistema no mezcla monedas de liquidación distintas.
 - Solo movimientos aceptados y liquidaciones confirmadas afectan el balance oficial.
@@ -986,12 +1170,12 @@ Leyenda: **[x]** sección desarrollada en este documento; **[ ]** artefacto exte
 - [x] **4.2. Requisitos no funcionales** — RNF-01 a RNF-14 con criterios verificables.
 - [x] **5. Plataforma de desarrollo** — entorno local, despliegue y dispositivos finales.
 - [x] **5.1. Sistema operativo** — Windows local según logs; entorno administrado para los servicios publicados.
-- [x] **5.2. Software de desarrollo** — lenguajes, framework, runtime, DB, testing y herramientas.
+- [x] **5.2. Software de desarrollo** — lengমাদের, framework, runtime, DB, testing y herramientas.
 - [x] **6. Diagramas UML — análisis** — despliegue y casos de uso conceptuales representados en Mermaid.
 - [x] **6.1. Infraestructura/diagrama de despliegue** — clientes, web, API, MySQL y almacenamiento local.
 - [x] **6.2. Casos de uso** — actores y casos representados en diagrama.
-- [x] **6.3. Documentación de casos de uso** — diez casos con precondiciones, flujo, excepciones, postcondiciones y criterios.
-- [x] **6.4. Diccionario de actores** — actores humanos y sistemas externos descritos.
+- [x] **6.3. Documentación de casos de uso** — doce casos con precondiciones, flujo, excepciones, postcondiciones, diagramas y criterios.
+- [x] **6.4. Diccionario de actores** — actores humanos y sistemas externos descritos y estandarizados.
 - [x] **6.5. Diccionario de casos de uso** — catálogo con identificador, actor, resumen y resultado.
 - [x] **7. Anexos/análisis de requisitos** — mapa de impacto, roadmap, User Story Map, historias y backlog resumido.
 - [x] **8. Referentes bibliográficos** — documentación oficial y artefactos internos.
